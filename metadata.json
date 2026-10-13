@@ -1,0 +1,6 @@
+{
+  "name": "HostelGuard - Hostel Night Attendance System",
+  "description": "Enterprise night roll-call, real-time curfew verification, and automated safety records across residential halls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

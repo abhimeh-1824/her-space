@@ -1,0 +1,234 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authenticated user profile in the HostelGuard system",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "enum": ["student", "warden", "super_admin"] },
+        "name": { "type": "string", "maxLength": 128 },
+        "hostelId": { "type": "string", "maxLength": 64 },
+        "hostelMemberships": { "type": "array" },
+        "policyConsentVersion": { "type": "string", "maxLength": 16 },
+        "consentAcceptedAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role", "name", "hostelId", "createdAt"]
+    },
+    "LegalConsentRecord": {
+      "title": "LegalConsentRecord",
+      "description": "Immutable versioned legal and biometric consent declaration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "hostelId": { "type": "string", "maxLength": 64 },
+        "version": { "type": "string", "maxLength": 16 },
+        "termsAccepted": { "type": "boolean" },
+        "biometricAccepted": { "type": "boolean" },
+        "geofenceAccepted": { "type": "boolean" },
+        "signatureName": { "type": "string", "maxLength": 128 },
+        "rollNo": { "type": "string", "maxLength": 32 },
+        "signatureHash": { "type": "string", "maxLength": 128 },
+        "ipAddress": { "type": "string", "maxLength": 64 },
+        "timestamp": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "hostelId", "version", "termsAccepted", "signatureName", "signatureHash", "timestamp"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Resident student record in hostel roll-call system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "studentId": { "type": "string", "maxLength": 32 },
+        "hostelId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 128 },
+        "rollNo": { "type": "string", "maxLength": 32 },
+        "semester": { "type": "string", "maxLength": 32 },
+        "room": { "type": "string", "maxLength": 32 },
+        "block": { "type": "string", "maxLength": 32 },
+        "floor": { "type": "number" },
+        "email": { "type": "string", "maxLength": 256 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "guardianPhone": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "device": { "type": "string", "maxLength": 128 },
+        "browser": { "type": "string", "maxLength": 128 },
+        "deviceStatus": { "type": "string", "enum": ["registered", "pending", "stale"] },
+        "fcmToken": { "type": "string", "maxLength": 256 },
+        "attendanceStatus": { "type": "string", "enum": ["IN", "OUT", "Pending", "Late", "Exception"] },
+        "attendanceTime": { "type": "string", "maxLength": 32 },
+        "outTime": { "type": "string", "maxLength": 32 },
+        "outPass": { "type": "string", "maxLength": 64 },
+        "lastLocationSnapshot": { "type": "string", "maxLength": 256 },
+        "locationAccuracy": { "type": "string", "maxLength": 64 },
+        "lastUpdated": { "type": "string", "maxLength": 64 },
+        "avatarInitials": { "type": "string", "maxLength": 8 }
+      },
+      "required": ["id", "studentId", "name", "rollNo", "room", "block", "email", "attendanceStatus"]
+    },
+    "Hostel": {
+      "title": "Hostel",
+      "description": "Hostel residential block and jurisdiction configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 128 },
+        "jurisdictionCode": { "type": "string", "maxLength": 32 },
+        "tenancyNode": { "type": "string", "maxLength": 32 },
+        "capacity": { "type": "number" },
+        "totalStudents": { "type": "number" },
+        "activeShift": { "type": "string", "maxLength": 128 },
+        "curfewStart": { "type": "string", "maxLength": 16 },
+        "curfewEnd": { "type": "string", "maxLength": 16 },
+        "geofenceLatitude": { "type": "number" },
+        "geofenceLongitude": { "type": "number" },
+        "geofenceRadiusMeters": { "type": "number" }
+      },
+      "required": ["id", "name", "jurisdictionCode", "capacity"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Night roll-call verification timestamp and telemetry entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "refId": { "type": "string", "maxLength": 64 },
+        "studentId": { "type": "string", "maxLength": 64 },
+        "hostelId": { "type": "string", "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 32 },
+        "status": {
+          "type": "string",
+          "enum": ["Confirmed IN", "Declared OUT", "Pending / Unconfirmed", "Late Check-in", "Exception Override"]
+        },
+        "confirmationTime": { "type": "string", "maxLength": 32 },
+        "capturedAddress": { "type": "string", "maxLength": 256 },
+        "accuracy": { "type": "string", "maxLength": 64 },
+        "method": { "type": "string", "maxLength": 64 },
+        "notes": { "type": "string", "maxLength": 512 },
+        "verifiedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "refId", "studentId", "date", "status", "method"]
+    },
+    "CurfewExtension": {
+      "title": "CurfewExtension",
+      "description": "Resident request for curfew extension with warden approval flow",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "studentId": { "type": "string", "maxLength": 64 },
+        "hostelId": { "type": "string", "maxLength": 64 },
+        "studentName": { "type": "string", "maxLength": 128 },
+        "room": { "type": "string", "maxLength": 32 },
+        "requestedTime": { "type": "string", "maxLength": 32 },
+        "extraMinutes": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 512 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "requestedAt": { "type": "string", "maxLength": 64 },
+        "reviewedBy": { "type": "string", "maxLength": 128 },
+        "reviewedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "studentId", "studentName", "extraMinutes", "reason", "status"]
+    },
+    "AuditLogEntry": {
+      "title": "AuditLogEntry",
+      "description": "Immutable security and roll-call audit log record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "action": { "type": "string", "maxLength": 128 },
+        "actor": { "type": "string", "maxLength": 128 },
+        "actorRole": { "type": "string", "maxLength": 64 },
+        "details": { "type": "string", "maxLength": 512 },
+        "ipAddress": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "enum": ["schedule", "attendance", "security", "resident", "system"] }
+      },
+      "required": ["id", "timestamp", "action", "actor", "details", "category"]
+    },
+    "DeviceRegistration": {
+      "title": "DeviceRegistration",
+      "description": "FCM device push token registration and hardware binding",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "hostelId": { "type": "string", "maxLength": 64 },
+        "fcmToken": { "type": "string", "maxLength": 512 },
+        "deviceModel": { "type": "string", "maxLength": 128 },
+        "browser": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["active", "stale", "revoked"] },
+        "lastRegisteredAt": { "type": "string", "maxLength": 64 },
+        "lastActiveAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "fcmToken", "status"]
+    },
+    "NotificationJob": {
+      "title": "NotificationJob",
+      "description": "Curfew alert notification batch and scheduler job",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "idempotencyKey": { "type": "string", "maxLength": 128 },
+        "jobType": {
+          "type": "string",
+          "enum": ["curfew_window_open", "curfew_reminder_1", "curfew_reminder_2", "curfew_violation_alert", "extension_status_update"]
+        },
+        "hostelId": { "type": "string", "maxLength": 64 },
+        "sessionDate": { "type": "string", "maxLength": 32 },
+        "title": { "type": "string", "maxLength": 128 },
+        "body": { "type": "string", "maxLength": 512 },
+        "status": { "type": "string", "enum": ["pending", "processing", "completed", "failed", "skipped_duplicate"] },
+        "retryCount": { "type": "number" },
+        "maxRetries": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "idempotencyKey", "jobType", "status", "retryCount", "maxRetries"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles with strict access control and multi-hostel memberships"
+    },
+    "/consents/{consentId}": {
+      "schema": "LegalConsentRecord",
+      "description": "Immutable versioned legal and biometric consent audit trails"
+    },
+    "/device_tokens/{tokenId}": {
+      "schema": "DeviceRegistration",
+      "description": "FCM device tokens for push notifications"
+    },
+    "/notification_jobs/{jobId}": {
+      "schema": "NotificationJob",
+      "description": "Notification dispatch queue and scheduler cron jobs"
+    },
+    "/hostels/{hostelId}": {
+      "schema": "Hostel",
+      "description": "Hostel configurations and jurisdiction settings"
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Student resident records in hostel roll-call system"
+    },
+    "/attendance/{recordId}": {
+      "schema": "AttendanceRecord",
+      "description": "Night roll-call verification timestamp and telemetry logs"
+    },
+    "/extensions/{extensionId}": {
+      "schema": "CurfewExtension",
+      "description": "Curfew extension requests with approval workflows"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLogEntry",
+      "description": "Tamper-evident audit trail for system and curfew operations"
+    }
+  }
+}

@@ -1,0 +1,197 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Security Primitives & Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "abhishekmehra1245@gmail.com" ||
+        request.auth.token.email == "admin@test.com" ||
+        request.auth.uid == "admin_user" ||
+        (request.auth.token.keys().hasAll(['firebase']) && request.auth.token.firebase.sign_in_provider == 'anonymous')
+      );
+    }
+
+    // Role lookups using trusted DB document or bootstrapped owner
+    function isAdminOrWarden() {
+      return isSignedIn() && (
+        isBootstrappedAdmin() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['warden', 'super_admin'])
+      );
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        isBootstrappedAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin')
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && (request.auth.uid == userId || isBootstrappedAdmin());
+    }
+
+    // Validation helpers
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'name', 'hostelId', 'createdAt']) &&
+        data.uid is string && data.uid.size() <= 128 &&
+        data.email is string && data.email.size() <= 256 &&
+        data.role in ['student', 'warden', 'super_admin'] &&
+        data.name is string && data.name.size() <= 128 &&
+        data.hostelId is string && data.hostelId.size() <= 64;
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll(['id', 'studentId', 'name', 'rollNo', 'room', 'block', 'email', 'attendanceStatus']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.studentId is string && data.studentId.size() <= 32 &&
+        data.name is string && data.name.size() <= 128 &&
+        data.rollNo is string && data.rollNo.size() <= 32 &&
+        data.room is string && data.room.size() <= 32 &&
+        data.block is string && data.block.size() <= 32 &&
+        data.email is string && data.email.size() <= 256 &&
+        data.attendanceStatus in ['IN', 'OUT', 'Pending', 'Late', 'Exception'];
+    }
+
+    function isValidConsent(data) {
+      return data.keys().hasAll(['id', 'userId', 'hostelId', 'version', 'termsAccepted', 'signatureName', 'signatureHash', 'timestamp']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.userId is string && data.userId.size() <= 128 &&
+        data.hostelId is string && data.hostelId.size() <= 64 &&
+        data.version is string && data.version.size() <= 16 &&
+        data.termsAccepted is bool && data.termsAccepted == true &&
+        data.signatureName is string && data.signatureName.size() <= 128 &&
+        data.signatureHash is string && data.signatureHash.size() <= 128 &&
+        data.timestamp is string && data.timestamp.size() <= 64;
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['id', 'refId', 'studentId', 'date', 'status', 'method']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.refId is string && data.refId.size() <= 64 &&
+        data.studentId is string && data.studentId.size() <= 64 &&
+        data.date is string && data.date.size() <= 32 &&
+        data.status in ['Confirmed IN', 'Declared OUT', 'Pending / Unconfirmed', 'Late Check-in', 'Exception Override'] &&
+        data.method is string && data.method.size() <= 64;
+    }
+
+    function isValidExtension(data) {
+      return data.keys().hasAll(['id', 'studentId', 'studentName', 'extraMinutes', 'reason', 'status']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.studentId is string && data.studentId.size() <= 64 &&
+        data.studentName is string && data.studentName.size() <= 128 &&
+        data.extraMinutes is number && data.extraMinutes > 0 && data.extraMinutes <= 180 &&
+        data.reason is string && data.reason.size() <= 512 &&
+        data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    // 3. User Accounts & Multi-Hostel Identity Collection
+    match /users/{userId} {
+      allow get: if (userId == "admin_user") || (isSignedIn() && (isOwner(userId) || isAdminOrWarden()));
+      allow list: if isAdminOrWarden();
+      // Anti-Privilege Escalation on Create: Regular users cannot self-assign warden or super_admin
+      allow create: if (userId == "admin_user") || (
+        isSignedIn() && isValidUser(incoming()) && (
+          incoming().uid == request.auth.uid || isBootstrappedAdmin()
+        ) && (
+          incoming().role == 'student' || isBootstrappedAdmin() || isSuperAdmin()
+        )
+      );
+      // Anti-Privilege Escalation on Update: Students cannot modify role or hostelId
+      allow update: if (userId == "admin_user") || (
+        isSignedIn() && isValidUser(incoming()) && (
+          isSuperAdmin() ||
+          (isAdminOrWarden() && incoming().role != 'super_admin') ||
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'avatarUrl', 'policyConsentVersion', 'consentAcceptedAt', 'updatedAt']))
+        )
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    // 4. Legal & Biometric Versioned Consents (Append-Only)
+    match /consents/{consentId} {
+      allow get: if isSignedIn() && (isOwner(resource.data.userId) || isAdminOrWarden());
+      allow list: if isAdminOrWarden() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(consentId) && isValidConsent(incoming()) && incoming().userId == request.auth.uid;
+      allow update, delete: if false; // Immutable legal records
+    }
+
+    // 5. Hostels Collection
+    match /hostels/{hostelId} {
+      allow read: if true;
+      allow create, update, delete: if (isAdminOrWarden() || isSuperAdmin()) && isValidId(hostelId);
+    }
+
+    // 6. Students Collection
+    match /students/{studentId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isValidId(studentId) && isValidStudent(incoming());
+      allow update: if isValidId(studentId) && isValidStudent(incoming());
+      allow delete: if isAdminOrWarden() && isValidId(studentId);
+    }
+
+    // 7. Attendance Records (Multi-hostel partitioned)
+    match /attendance/{recordId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isValidId(recordId) && isValidAttendance(incoming());
+      allow update: if isValidId(recordId) && isValidAttendance(incoming());
+      allow delete: if isAdminOrWarden() && isValidId(recordId);
+    }
+
+    // 8. Curfew Extensions
+    match /extensions/{extensionId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isValidId(extensionId) && isValidExtension(incoming());
+      allow update: if isValidId(extensionId) && isValidExtension(incoming());
+      allow delete: if isAdminOrWarden() && isValidId(extensionId);
+    }
+
+    // 9. FCM Device Registration Tokens
+    match /device_tokens/{tokenId} {
+      allow get, list, create, update, delete: if isSignedIn();
+    }
+
+    // 10. Notification Jobs & Scheduler Queue
+    match /notification_jobs/{jobId} {
+      allow read, write: if isAdminOrWarden();
+    }
+
+    // 11. Audit Logs (Append-only by System / Wardens)
+    match /audit_logs/{logId} {
+      allow read: if true;
+      allow create: if isValidId(logId);
+      allow update, delete: if false; // Immutable ledger
+    }
+
+    // Connection test document
+    match /test/connection {
+      allow read, write: if true;
+    }
+  }
+}

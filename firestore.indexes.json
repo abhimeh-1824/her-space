@@ -1,0 +1,40 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "attendance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hostelId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "students",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hostelId", "order": "ASCENDING" },
+        { "fieldPath": "attendanceStatus", "order": "ASCENDING" },
+        { "fieldPath": "room", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "extensions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hostelId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "requestedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "consents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "version", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
