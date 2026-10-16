@@ -100,7 +100,7 @@ export const config = {
     port: parseInt(process.env.PORT || '3000', 10),
     appUrl: envStr(
       process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL,
-      typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+      typeof window !== 'undefined' ? window.location.origin : 'https://her-space-pi.vercel.app'
     ),
     cronSecret: envStr(process.env.CRON_SECRET, ''),
     isProduction: process.env.NODE_ENV === 'production',

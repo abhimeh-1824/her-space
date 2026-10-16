@@ -50,7 +50,7 @@ export default {
       sessionDate: nowIso.slice(0, 10),
     };
 
-    const targetUrl = env.HOSTELGUARD_API_URL || 'https://her-space.vercel.app/api/scheduler/cron';
+    const targetUrl = env.HOSTELGUARD_API_URL || 'https://her-space-pi.vercel.app/api/scheduler/cron';
     const secret = env.CRON_SECRET || 'hostelguard_cf_worker_cron_sec_89b21';
 
     try {

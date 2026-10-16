@@ -106,7 +106,7 @@ export async function createResidentInvitation(
   }
 
   // Update student document with setup link reference
-  const baseUrl = params.appBaseUrl || (typeof window !== 'undefined' ? window.location.origin : 'https://her-space.app');
+  const baseUrl = params.appBaseUrl || (typeof window !== 'undefined' ? window.location.origin : 'https://her-space-pi.vercel.app');
   const setupUrl = `${baseUrl}/setup/${rawToken}`;
 
   try {
