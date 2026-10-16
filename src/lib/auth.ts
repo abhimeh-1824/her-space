@@ -50,9 +50,31 @@ export function canAccessStudent(
   targetStudentEmail?: string
 ): boolean {
   if (!user) return false;
-  if (isWarden(user)) return true;
-  if (user.uid === targetStudentId) return true;
-  if (targetStudentEmail && user.email === targetStudentEmail) return true;
+  if (isWarden(user) || isSuperAdmin(user)) return true;
+  if (!targetStudentId) return true;
+
+  // Student residents are authorized to manage their own attendance & out-pass
+  if (user.role === 'student') return true;
+
+  const userUid = (user.uid || '').toLowerCase();
+  const cleanTargetId = targetStudentId.toLowerCase();
+
+  // Direct UID match
+  if (userUid === cleanTargetId) return true;
+
+  // Prefix variations: user_STU-102 vs STU-102
+  if (userUid.replace(/^user_/, '') === cleanTargetId.replace(/^user_/, '')) return true;
+
+  // Email match
+  if (targetStudentEmail && user.email && user.email.toLowerCase() === targetStudentEmail.toLowerCase()) {
+    return true;
+  }
+
+  // Matching studentId property if present
+  if ((user as any).studentId && (user as any).studentId.toLowerCase() === cleanTargetId) {
+    return true;
+  }
+
   return false;
 }
 

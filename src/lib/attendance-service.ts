@@ -22,6 +22,7 @@ import { canAccessStudent } from './auth';
 export interface CheckInRequest {
   studentId: string; // STU-102
   studentDocId: string; // Firestore document UID
+  studentEmail?: string;
   hostelId: string;
   location: LocationCapture;
   actor: UserProfile; // Signed-in user executing the check-in
@@ -42,8 +43,10 @@ export interface CheckInResult {
 export interface CheckOutRequest {
   studentDocId: string;
   studentId: string;
+  studentEmail?: string;
   hostelId: string;
   outPassReason: string;
+  estimatedReturnTime?: string;
   actor: UserProfile;
   sessionDate?: string;
 }
@@ -99,7 +102,7 @@ export async function checkInResident(req: CheckInRequest): Promise<CheckInResul
   } = req;
 
   // 1. Authorization Gate: Only the student themselves or an authorized warden can check in
-  if (!canAccessStudent(actor, studentDocId)) {
+  if (!canAccessStudent(actor, studentDocId, req.studentEmail)) {
     throw new ForbiddenError(
       `Unauthorized: User ${actor.email} is not authorized to check in student ${studentId}.`
     );
@@ -282,9 +285,9 @@ export async function checkInResident(req: CheckInRequest): Promise<CheckInResul
  * Declares a resident OUT (Out-Pass Authorization)
  */
 export async function checkOutResident(req: CheckOutRequest): Promise<AttendanceRecord> {
-  const { studentDocId, studentId, hostelId, outPassReason, actor, sessionDate } = req;
+  const { studentDocId, studentId, hostelId, outPassReason, estimatedReturnTime, actor, sessionDate } = req;
 
-  if (!canAccessStudent(actor, studentDocId)) {
+  if (!canAccessStudent(actor, studentDocId, req.studentEmail)) {
     throw new ForbiddenError('Unauthorized: Insufficient permissions to declare out-pass.');
   }
 
@@ -293,12 +296,12 @@ export async function checkOutResident(req: CheckOutRequest): Promise<Attendance
   const now = new Date();
   const timeFormatted = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  // Flow D: If the resident is already OUT, do not create another OUT record for the same uninterrupted absence
+  // Flow D: If the resident is already OUT and no new reason provided, return existing record
   try {
     const studentSnap = await getDoc(doc(db, 'students', studentDocId));
     if (studentSnap.exists()) {
       const studentData = studentSnap.data() as Student;
-      if (studentData.attendanceStatus === 'OUT') {
+      if (studentData.attendanceStatus === 'OUT' && !outPassReason && !estimatedReturnTime) {
         const existingRec = await getDoc(doc(db, 'attendance', recordId));
         if (existingRec.exists()) {
           return existingRec.data() as AttendanceRecord;
@@ -321,22 +324,27 @@ export async function checkOutResident(req: CheckOutRequest): Promise<Attendance
     method: 'Resident Handset Check-out',
     notes: outPassReason || 'Left hostel',
     outReason: outPassReason,
+    estimatedReturnTime: estimatedReturnTime || '',
     checkOutAt: now.toISOString(),
     verifiedBy: actor.name,
     createdAt: now.toISOString(),
   };
 
   try {
-    await setDoc(doc(db, 'attendance', recordId), record);
-    await updateDoc(doc(db, 'students', studentDocId), {
-      attendanceStatus: 'OUT',
-      outTime: timeFormatted,
-      outReason: outPassReason || '',
-      estimatedReturnTime: '', // Reset on new departure
-      estimatedReturnTimeSubmittedAt: '',
-      outPass: `#OUT-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-      lastUpdated: timeFormatted,
-    });
+    await setDoc(doc(db, 'attendance', recordId), record, { merge: true });
+    await setDoc(
+      doc(db, 'students', studentDocId),
+      {
+        attendanceStatus: 'OUT',
+        outTime: timeFormatted,
+        outReason: outPassReason || '',
+        estimatedReturnTime: estimatedReturnTime || '',
+        estimatedReturnTimeSubmittedAt: estimatedReturnTime ? now.toISOString() : '',
+        outPass: `#OUT-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+        lastUpdated: timeFormatted,
+      },
+      { merge: true }
+    );
   } catch (err) {
     console.warn('[CheckOut] Local buffer recording:', err);
   }
@@ -369,17 +377,25 @@ export async function recordEstimatedReturnTime(
   const nowIso = new Date().toISOString();
 
   try {
-    await updateDoc(doc(db, 'students', studentDocId), {
-      estimatedReturnTime,
-      estimatedReturnTimeSubmittedAt: nowIso,
-      lastUpdated: `Expected return: ${estimatedReturnTime}`,
-    });
-
-    try {
-      await updateDoc(doc(db, 'attendance', recordId), {
+    await setDoc(
+      doc(db, 'students', studentDocId),
+      {
         estimatedReturnTime,
         estimatedReturnTimeSubmittedAt: nowIso,
-      });
+        lastUpdated: `Expected return: ${estimatedReturnTime}`,
+      },
+      { merge: true }
+    );
+
+    try {
+      await setDoc(
+        doc(db, 'attendance', recordId),
+        {
+          estimatedReturnTime,
+          estimatedReturnTimeSubmittedAt: nowIso,
+        },
+        { merge: true }
+      );
     } catch {}
   } catch (err) {
     console.warn('[recordEstimatedReturnTime] Local buffer note:', err);

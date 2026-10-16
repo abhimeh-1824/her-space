@@ -8,12 +8,15 @@ export interface LocationSetupViewProps {
 }
 
 export const LocationSetupView: React.FC<LocationSetupViewProps> = ({ onNavigate }) => {
-  const { user } = useAuth();
+  const { user, authorizedHostels } = useAuth();
   const [permissionStatus, setPermissionStatus] = useState<'prompt' | 'granted' | 'denied'>('prompt');
   const [isCheckingLocation, setIsCheckingLocation] = useState(false);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
-  const [pushEnabled, setPushEnabled] = useState(true);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<'default' | 'granted' | 'denied'>('default');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const activeHostel = authorizedHostels[0] || null;
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -27,9 +30,12 @@ export const LocationSetupView: React.FC<LocationSetupViewProps> = ({ onNavigate
         res.onchange = () => {
           setPermissionStatus(res.state as 'prompt' | 'granted' | 'denied');
         };
-      }).catch(() => {
-        // Fallback if permission query fails
-      });
+      }).catch(() => {});
+    }
+
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotifPermission(Notification.permission);
+      setPushEnabled(Notification.permission === 'granted');
     }
   }, []);
 
@@ -75,12 +81,89 @@ export const LocationSetupView: React.FC<LocationSetupViewProps> = ({ onNavigate
     );
   };
 
-  const handleTestNotification = () => {
-    if (!pushEnabled) {
-      showToast('Please enable notifications first');
+  const handleToggleNotifications = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      showToast('Notifications not supported by this browser');
       return;
     }
-    showToast('Test Notification: "HER-SPACE night check-in is now open (10:00 PM)"');
+
+    if (Notification.permission === 'granted') {
+      const next = !pushEnabled;
+      setPushEnabled(next);
+      showToast(next ? 'Reminders enabled on this device' : 'Reminders paused');
+      return;
+    }
+
+    try {
+      const perm = await Notification.requestPermission();
+      setNotifPermission(perm);
+      if (perm === 'granted') {
+        setPushEnabled(true);
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('/firebase-messaging-sw.js').catch(() => {});
+        }
+        showToast('Device notifications enabled!');
+      } else {
+        setPushEnabled(false);
+        showToast('Notification permission was blocked in browser settings');
+      }
+    } catch {
+      showToast('Unable to request notification permission');
+    }
+  };
+
+  const handleTestNotification = async () => {
+    if (typeof window === 'undefined') return;
+
+    if (!('Notification' in window)) {
+      showToast('This browser does not support web notifications.');
+      return;
+    }
+
+    let perm = Notification.permission;
+    if (perm !== 'granted') {
+      try {
+        perm = await Notification.requestPermission();
+        setNotifPermission(perm);
+      } catch {}
+    }
+
+    if (perm === 'granted') {
+      setPushEnabled(true);
+
+      // 1. Try service worker push notification
+      if ('serviceWorker' in navigator) {
+        try {
+          const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+          if (reg && reg.showNotification) {
+            await reg.showNotification('HER-SPACE Curfew Alert', {
+              body: `Night check-in reminder: Roll-call window is active for ${activeHostel?.name || 'HER-SPACE'}.`,
+              icon: '/icon-192.png',
+              badge: '/badge-72.png',
+              tag: 'her-space-curfew-reminder',
+            });
+            showToast('Real notification sent to your device!');
+            return;
+          }
+        } catch (swErr) {
+          console.debug('Service Worker showNotification fallback:', swErr);
+        }
+      }
+
+      // 2. Fallback to standard Window Notification
+      try {
+        new Notification('HER-SPACE Curfew Alert', {
+          body: `Night check-in reminder: Roll-call window is active for ${activeHostel?.name || 'HER-SPACE'}.`,
+          icon: '/icon-192.png',
+        });
+        showToast('Real notification sent to your device!');
+      } catch (nErr) {
+        showToast('Notification permission granted!');
+      }
+    } else {
+      setPushEnabled(false);
+      showToast('Notification permission was denied. Please allow notifications in site settings.');
+    }
   };
 
   return (
@@ -225,11 +308,7 @@ export const LocationSetupView: React.FC<LocationSetupViewProps> = ({ onNavigate
             </div>
             <button
               type="button"
-              onClick={() => {
-                const next = !pushEnabled;
-                setPushEnabled(next);
-                showToast(next ? 'Reminders enabled' : 'Reminders turned off');
-              }}
+              onClick={handleToggleNotifications}
               className="p-1 text-primary cursor-pointer hover:opacity-80 transition-opacity"
               aria-label="Toggle notifications"
             >
@@ -242,15 +321,19 @@ export const LocationSetupView: React.FC<LocationSetupViewProps> = ({ onNavigate
           <div className="p-3.5 rounded-xl bg-surface-container-low/70 border border-outline-variant/20 space-y-2">
             <div className="flex items-center justify-between text-body-sm font-medium">
               <span className="text-on-surface">Night Check-In Starts:</span>
-              <span className="font-bold text-primary">10:00 PM</span>
+              <span className="font-bold text-primary">{activeHostel?.curfewStart || '10:00 PM'}</span>
             </div>
             <div className="flex items-center justify-between text-body-sm font-medium">
               <span className="text-on-surface">Reminder Alert:</span>
-              <span className="font-semibold text-secondary">10:15 PM &amp; 11:00 PM</span>
+              <span className="font-semibold text-secondary">
+                {activeHostel?.reminderSchedule && activeHostel.reminderSchedule.length > 0
+                  ? activeHostel.reminderSchedule.join(', ')
+                  : '10:15 PM & 11:00 PM'}
+              </span>
             </div>
             <div className="flex items-center justify-between text-body-sm font-medium">
               <span className="text-on-surface">Curfew Lockout:</span>
-              <span className="font-bold text-red-600">12:00 AM (Midnight)</span>
+              <span className="font-bold text-red-600">{activeHostel?.curfewEnd || '12:00 AM (Midnight)'}</span>
             </div>
           </div>
 

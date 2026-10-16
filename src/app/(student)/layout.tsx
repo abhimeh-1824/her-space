@@ -5,8 +5,10 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter, usePathname } from 'next/navigation';
 import { isAuthorizedForRoute } from '@/lib/auth-guard';
 
+import { ProductionNavbar } from '@/components/layout/ProductionNavbar';
+
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
-  const { user, isInitialized } = useAuth();
+  const { user, isInitialized, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname() || '';
 
@@ -20,12 +22,17 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     }
   }, [isInitialized, authCheck.authorized, authCheck.redirectTo, router]);
 
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/login');
+  };
+
   // While validating credentials, show verification spinner
   if (!isInitialized) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-9 h-9 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-9 h-9 border-3 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
           <p className="text-xs text-secondary font-medium tracking-wide">Verifying resident access...</p>
         </div>
       </div>
@@ -49,7 +56,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           <div className="pt-2">
             <button
               onClick={() => router.replace(authCheck.redirectTo || '/login')}
-              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-lg shadow-blue-600/30 cursor-pointer transition-colors"
+              className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold shadow-lg shadow-violet-600/30 cursor-pointer transition-colors"
             >
               Return to Authorized Portal
             </button>
@@ -59,5 +66,12 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     );
   }
 
-  return <>{children}</>;
+  return (
+    <div className="min-h-screen bg-surface flex flex-col md:flex-row">
+      <ProductionNavbar onLogout={handleLogout} />
+      <main className="flex-1 flex flex-col bg-surface overflow-x-hidden md:pl-64 min-w-0">
+        {children}
+      </main>
+    </div>
+  );
 }

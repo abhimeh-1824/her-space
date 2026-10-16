@@ -583,7 +583,9 @@ export async function updateStudentAttendanceInDb(
   studentDocId: string,
   status: 'IN' | 'OUT' | 'Pending' | 'Late' | 'Exception',
   timeFormatted?: string,
-  notes?: string
+  notes?: string,
+  outReason?: string,
+  estimatedReturnTime?: string
 ): Promise<void> {
   const timeNow = timeFormatted || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -596,14 +598,16 @@ export async function updateStudentAttendanceInDb(
       lastUpdated: timeNow,
       attendanceTime: status === 'IN' ? timeNow : current[sIdx].attendanceTime,
       outTime: status === 'OUT' ? timeNow : current[sIdx].outTime,
-      notes: notes || current[sIdx].notes,
+      notes: notes !== undefined ? notes : current[sIdx].notes,
+      outReason: outReason !== undefined ? outReason : current[sIdx].outReason,
+      estimatedReturnTime: estimatedReturnTime !== undefined ? estimatedReturnTime : current[sIdx].estimatedReturnTime,
     };
     const newList = current.map((s, i) => (i === sIdx ? updated : s));
     saveCachedStudents(newList);
     studentListeners.forEach((fn) => fn(newList));
   }
 
-  // Single authoritative Firestore write (No duplicate API calls)
+  // Single authoritative Firestore write with merge: true (idempotent, never throws 'No document to update')
   try {
     const updates: Record<string, unknown> = {
       attendanceStatus: status,
@@ -612,11 +616,45 @@ export async function updateStudentAttendanceInDb(
     if (status === 'IN') updates.attendanceTime = timeNow;
     if (status === 'OUT') updates.outTime = timeNow;
     if (notes) updates.notes = notes;
+    if (outReason) updates.outReason = outReason;
+    if (estimatedReturnTime) updates.estimatedReturnTime = estimatedReturnTime;
 
-    await updateDoc(doc(db, 'students', studentDocId), updates);
+    await setDoc(doc(db, 'students', studentDocId), updates, { merge: true });
     notifySyncBus('students');
   } catch (err) {
     console.error('[updateStudentAttendanceInDb] Firestore error:', err);
+  }
+}
+
+export async function updateStudentEstimatedReturnTimeInDb(
+  studentDocId: string,
+  estimatedReturnTime: string
+): Promise<void> {
+  const current = loadCachedStudents();
+  const sIdx = current.findIndex((s) => s.id === studentDocId);
+  if (sIdx >= 0) {
+    const updated = {
+      ...current[sIdx],
+      estimatedReturnTime,
+      lastUpdated: `Expected return: ${estimatedReturnTime}`,
+    };
+    const newList = current.map((s, i) => (i === sIdx ? updated : s));
+    saveCachedStudents(newList);
+    studentListeners.forEach((fn) => fn(newList));
+  }
+
+  try {
+    await setDoc(
+      doc(db, 'students', studentDocId),
+      {
+        estimatedReturnTime,
+        lastUpdated: `Expected return: ${estimatedReturnTime}`,
+      },
+      { merge: true }
+    );
+    notifySyncBus('students');
+  } catch (err) {
+    console.error('[updateStudentEstimatedReturnTimeInDb] Firestore error:', err);
   }
 }
 

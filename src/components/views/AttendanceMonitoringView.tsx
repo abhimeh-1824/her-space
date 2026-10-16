@@ -3,6 +3,12 @@ import { AppScreen, Student, Hostel } from '../../types';
 import { exportAttendanceToCsv } from '../../lib/hostel-service';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeToStudents, subscribeToHostels, updateStudentAttendanceInDb } from '../../lib/db-seed';
+import {
+  generateAbsenceReport,
+  AbsenceReportData,
+  addFiveMinutes,
+  REPORT_RECIPIENT_NUMBERS,
+} from '../../lib/absence-report-service';
 
 export interface AttendanceMonitoringViewProps {
   onNavigate: (screen: AppScreen) => void;
@@ -32,6 +38,11 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [auditNote, setAuditNote] = useState('Verified present in-person during floor sweep.');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // 5-Min Post-Curfew Absence Reports
+  const [latestReport, setLatestReport] = useState<AbsenceReportData | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -179,6 +190,72 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
   const outCount = hostelScopedStudents.filter((s) => s.attendanceStatus === 'OUT').length;
   const pendingCount = hostelScopedStudents.filter((s) => s.attendanceStatus === 'Pending').length;
 
+  // Automated 5-min Post-Reminder Watcher
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const interval = setInterval(() => {
+      const activeH = authorizedHostels?.[0] || hostels?.[0];
+      if (!activeH) return;
+
+      const schedule = [activeH.curfewStart, ...(activeH.reminderSchedule || [])].filter(Boolean) as string[];
+      if (schedule.length === 0) return;
+
+      const now = new Date();
+      const currentHH = String(now.getHours()).padStart(2, '0');
+      const currentMM = String(now.getMinutes()).padStart(2, '0');
+      const currentTime = `${currentHH}:${currentMM}`;
+
+      // Check if current time is reminderSlot + 5 min
+      for (const slot of schedule) {
+        const triggerTime = addFiveMinutes(slot);
+        if (triggerTime === currentTime) {
+          const reportKey = `abs_rep_${activeH.id}_${triggerTime}_${now.toISOString().slice(0, 10)}`;
+          if (!sessionStorage.getItem(reportKey)) {
+            sessionStorage.setItem(reportKey, 'true');
+            generateAbsenceReport({
+              hostelId: activeH.id,
+              hostelName: activeH.name,
+              reminderSlot: slot,
+              studentsList: hostelScopedStudents,
+            })
+              .then((rep) => {
+                setLatestReport(rep);
+                showToast(`Auto 5-min post-curfew absence report generated for ${rep.reminderSlot}`);
+              })
+              .catch(() => {});
+          }
+        }
+      }
+    }, 20000);
+
+    return () => clearInterval(interval);
+  }, [authorizedHostels, hostels, hostelScopedStudents]);
+
+  const handleManualGenerateReport = async () => {
+    setIsGeneratingReport(true);
+    try {
+      const activeH = authorizedHostels?.[0] || hostels?.[0];
+      const now = new Date();
+      const currentHH = String(now.getHours()).padStart(2, '0');
+      const currentMM = String(now.getMinutes()).padStart(2, '0');
+      const currentTime = `${currentHH}:${currentMM}`;
+
+      const rep = await generateAbsenceReport({
+        hostelId: activeH?.id || 'HST-HER-01',
+        hostelName: activeH?.name || 'HER-SPACE Hostel',
+        reminderSlot: currentTime,
+        studentsList: hostelScopedStudents,
+      });
+      setLatestReport(rep);
+      setShowReportModal(true);
+      showToast('Absence report generated successfully!');
+    } catch {
+      showToast('Error generating absence report.');
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
   return (
     <div className="bg-surface font-body-md text-on-surface antialiased min-h-screen flex flex-col pb-24 md:pb-8">
       {/* Toast Notification */}
@@ -247,6 +324,89 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
             </div>
           </div>
         )}
+
+        {/* 5-Min Post-Curfew Absence Reports Card */}
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-violet-500/30 rounded-2xl p-4 sm:p-5 shadow-lg text-white space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-violet-600/30 text-violet-400 border border-violet-500/40 flex items-center justify-center font-bold shrink-0">
+                <span className="material-symbols-outlined text-[22px]">quickreply</span>
+              </div>
+              <div>
+                <h3 className="font-bold text-sm sm:text-base flex items-center gap-2">
+                  <span>5-Min Post-Curfew Absence Reports</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-500/30">
+                    Live Dispatch Active
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Consolidated report of all OUT residents sent 5 minutes after each curfew reminder to Helpline &amp; Monitor.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleManualGenerateReport}
+                disabled={isGeneratingReport}
+                className="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-md disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-sm">assignment</span>
+                <span>{isGeneratingReport ? 'Compiling...' : 'Generate Live Report'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Numbers list & 1-click WhatsApp Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
+            {/* Number 1: Helpline */}
+            <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3 flex items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
+                  <span className="material-symbols-outlined text-sm text-sky-400">support_agent</span>
+                  <span>Helpline Number: <strong className="text-white font-mono">6267549800</strong></span>
+                </div>
+                <p className="text-[11px] text-slate-400">Security &amp; Emergency Assistance Desk</p>
+              </div>
+              <a
+                href={
+                  latestReport?.whatsappUrls?.['6267549800'] ||
+                  `https://api.whatsapp.com/send?phone=916267549800&text=${encodeURIComponent(`HER-SPACE Live Absence Report: ${outCount} residents currently OUT.`)}`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1 shrink-0 transition-colors shadow-sm"
+              >
+                <span className="material-symbols-outlined text-sm">send</span>
+                <span>Send WhatsApp</span>
+              </a>
+            </div>
+
+            {/* Number 2: Monitor */}
+            <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3 flex items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
+                  <span className="material-symbols-outlined text-sm text-indigo-400">admin_panel_settings</span>
+                  <span>Designated Monitor: <strong className="text-white font-mono">9399667720</strong></span>
+                </div>
+                <p className="text-[11px] text-slate-400">Administrative Curfew Roll-Call Monitor</p>
+              </div>
+              <a
+                href={
+                  latestReport?.whatsappUrls?.['9399667720'] ||
+                  `https://api.whatsapp.com/send?phone=919399667720&text=${encodeURIComponent(`HER-SPACE Live Absence Report: ${outCount} residents currently OUT.`)}`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1 shrink-0 transition-colors shadow-sm"
+              >
+                <span className="material-symbols-outlined text-sm">send</span>
+                <span>Send WhatsApp</span>
+              </a>
+            </div>
+          </div>
+        </div>
 
         {/* Quick Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -625,6 +785,65 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Absence Report Preview Modal */}
+      {showReportModal && latestReport && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="max-w-xl w-full bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl p-6 text-white space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-amber-400">summarize</span>
+                <h3 className="font-bold text-base">5-Min Post-Curfew Absence Report</h3>
+              </div>
+              <button
+                onClick={() => setShowReportModal(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 font-mono text-xs text-slate-200 whitespace-pre-wrap max-h-72 overflow-y-auto">
+              {latestReport.reportText}
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-700 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(latestReport.reportText);
+                  showToast('Report copied to clipboard!');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold cursor-pointer flex items-center gap-1.5 transition-colors"
+              >
+                <span className="material-symbols-outlined text-sm">content_copy</span>
+                <span>Copy Full Text</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <a
+                  href={latestReport.whatsappUrls['6267549800']}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold flex items-center gap-1.5 shadow-sm"
+                >
+                  <span className="material-symbols-outlined text-sm">send</span>
+                  <span>WhatsApp 6267549800</span>
+                </a>
+                <a
+                  href={latestReport.whatsappUrls['9399667720']}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 shadow-sm"
+                >
+                  <span className="material-symbols-outlined text-sm">send</span>
+                  <span>WhatsApp 9399667720</span>
+                </a>
+              </div>
+            </div>
           </div>
         </div>
       )}
