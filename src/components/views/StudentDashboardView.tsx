@@ -129,8 +129,16 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   };
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      setPushPermission(Notification.permission);
+    if (typeof window !== 'undefined') {
+      if ('Notification' in window) {
+        setPushPermission(Notification.permission);
+      }
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker
+          .register('/firebase-messaging-sw.js')
+          .then((reg) => console.log('[HER-SPACE SW] Active:', reg.scope))
+          .catch((err) => console.warn('[HER-SPACE SW] Registration error:', err));
+      }
     }
   }, []);
 
@@ -245,34 +253,66 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
     playNotificationChime();
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
-        navigator.vibrate([300, 100, 300, 100, 300]);
+        navigator.vibrate([400, 150, 400, 150, 400]);
       } catch {}
     }
 
     if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
 
-    // Mobile Android Chrome strictly requires ServiceWorkerRegistration.showNotification()
+    let perm = Notification.permission;
+    if (perm === 'default') {
+      try {
+        perm = await Notification.requestPermission();
+        setPushPermission(perm);
+      } catch {}
+    }
+
+    if (perm !== 'granted') return;
+
+    // Mobile Android Chrome strictly delivers to Notification Bar via ServiceWorkerRegistration.showNotification()
     if ('serviceWorker' in navigator) {
       try {
-        const reg = await navigator.serviceWorker.ready;
-        if (reg && reg.showNotification) {
-          const notifOpts: Record<string, unknown> = {
+        let reg = await navigator.serviceWorker.getRegistration();
+        if (!reg) {
+          reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        }
+
+        if (reg) {
+          const notifOpts: any = {
             ...options,
-            vibrate: [300, 100, 300, 100, 300],
+            vibrate: [400, 150, 400, 150, 400],
+            renotify: true,
+            requireInteraction: true, // Keeps in Android top notification tray/bar
+            tag: options.tag || `her-space-alert-${Date.now()}`,
+            data: {
+              url: '/student/dashboard',
+              timestamp: Date.now(),
+            },
           };
           if (options.icon) notifOpts.icon = options.icon;
           if (options.badge) notifOpts.badge = options.badge;
-          await reg.showNotification(title, notifOpts as NotificationOptions);
+
+          await reg.showNotification(title, notifOpts);
+
+          if (reg.active) {
+            reg.active.postMessage({
+              type: 'SHOW_NOTIFICATION',
+              title,
+              options: notifOpts,
+            });
+          }
           return;
         }
       } catch (swErr) {
-        console.warn('[Notification] ServiceWorker ready fallback:', swErr);
+        console.warn('[Notification] ServiceWorker registration showNotification error:', swErr);
       }
     }
 
     try {
-      new Notification(title, options);
+      new Notification(title, {
+        ...options,
+        requireInteraction: true,
+      });
     } catch (winErr) {
       console.warn('[Notification] Window notification fallback:', winErr);
     }

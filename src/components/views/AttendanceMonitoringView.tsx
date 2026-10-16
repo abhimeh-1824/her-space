@@ -1093,9 +1093,89 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
               </div>
             </div>
 
-            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 font-mono text-xs text-slate-200 whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed">
-              {latestReport.reportText}
+            {/* Compact Table Format for Large Hostels (200+ Residents) */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/90 overflow-hidden max-h-80 overflow-y-auto">
+              {latestReport.outStudents.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400">
+                  ✅ All residents are verified inside the hostel. Zero absences.
+                </div>
+              ) : (
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-900 border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400 font-semibold sticky top-0">
+                    <tr>
+                      <th className="py-2.5 px-3">#</th>
+                      <th className="py-2.5 px-3">Resident</th>
+                      <th className="py-2.5 px-3">Room</th>
+                      <th className="py-2.5 px-3">Student Mobile</th>
+                      <th className="py-2.5 px-3 text-right">Direct Call</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80">
+                    {latestReport.outStudents.map((s, idx) => {
+                      const cleanPhone = (s.phone || '').replace(/[^0-9]/g, '');
+                      const cleanParent = (s.guardianPhone || '').replace(/[^0-9]/g, '');
+
+                      return (
+                        <tr key={s.id || idx} className="hover:bg-slate-900/50 transition-colors">
+                          <td className="py-3 px-3 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                          <td className="py-3 px-3">
+                            <p className="font-bold text-white leading-tight">{s.name}</p>
+                            {s.estimatedReturnTime && (
+                              <p className="text-[10px] text-amber-400 mt-0.5">Exp: {s.estimatedReturnTime}</p>
+                            )}
+                          </td>
+                          <td className="py-3 px-3">
+                            <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 font-bold font-mono text-[11px]">
+                              {s.room || '—'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3">
+                            <span className="font-mono text-slate-300">{s.phone || 'N/A'}</span>
+                            {cleanParent ? (
+                              <p className="text-[10px] text-slate-500 font-mono">P: {s.guardianPhone}</p>
+                            ) : null}
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {cleanPhone ? (
+                                <a
+                                  href={`tel:${cleanPhone}`}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[11px] transition-colors shadow-sm"
+                                  title={`Direct Call ${s.name}`}
+                                >
+                                  <span className="material-symbols-outlined text-[14px]">call</span>
+                                  <span>Call</span>
+                                </a>
+                              ) : null}
+                              {cleanParent ? (
+                                <a
+                                  href={`tel:${cleanParent}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-[11px] transition-colors"
+                                  title="Call Parent / Guardian"
+                                >
+                                  <span className="material-symbols-outlined text-[14px]">family_restroom</span>
+                                  <span>Parent</span>
+                                </a>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
+
+            {/* Collapsible raw text preview */}
+            <details className="text-xs text-slate-400">
+              <summary className="cursor-pointer hover:text-slate-200 font-semibold py-1">
+                Preview Formatted WhatsApp Message ({latestReport.outStudents.length} residents)
+              </summary>
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 font-mono text-[11px] text-slate-300 whitespace-pre-wrap max-h-36 overflow-y-auto leading-relaxed mt-1">
+                {latestReport.reportText}
+              </div>
+            </details>
 
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-700 text-xs">
               <button

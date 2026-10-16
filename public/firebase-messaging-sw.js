@@ -1,65 +1,86 @@
 /**
- * HER-SPACE — Firebase Cloud Messaging Web Push Service Worker
- * Handles background push notifications, curfew alerts, and click actions.
+ * HER-SPACE — Firebase Cloud Messaging & Web Push Service Worker
+ * Handles background push notifications, curfew alerts, and system tray/notification bar actions.
  */
 
 /* eslint-disable no-undef */
-importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js');
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+});
 
-// Initialize Firebase in Service Worker dynamically (No hardcoded credentials)
-const swUrl = new URL(self.location.href);
-const apiKey = swUrl.searchParams.get('apiKey');
-const projectId = swUrl.searchParams.get('projectId');
-const appId = swUrl.searchParams.get('appId');
-const messagingSenderId = swUrl.searchParams.get('messagingSenderId');
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
 
-if (apiKey && projectId) {
+// Safe Firebase initialization
+try {
+  importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js');
+  importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js');
+
+  const swUrl = new URL(self.location.href);
+  const apiKey = swUrl.searchParams.get('apiKey') || 'AIzaSyBweVzmweTJpPW6u61EzymZCyX9hYyh-Qw';
+  const projectId = swUrl.searchParams.get('projectId') || 'tidy-marker-fmn89';
+  const appId = swUrl.searchParams.get('appId') || '1:1555908782:web:a32e749f3519e89f0b853f';
+  const messagingSenderId = swUrl.searchParams.get('messagingSenderId') || '1555908782';
+
   firebase.initializeApp({
     apiKey,
     projectId,
-    appId: appId || '',
-    messagingSenderId: messagingSenderId || '',
+    appId,
+    messagingSenderId,
   });
-}
 
-const messaging = firebase.messaging();
+  const messaging = firebase.messaging();
 
-// Handle background push payload
-messaging.onBackgroundMessage((payload) => {
-  console.log('[HER-SPACE Service Worker] Received background notification:', payload);
+  // Handle background push payload from FCM server
+  messaging.onBackgroundMessage((payload) => {
+    console.log('[HER-SPACE Service Worker] Background push received:', payload);
 
-  const title = payload.notification?.title || payload.data?.title || 'HER-SPACE Night Curfew Alert';
-  const options = {
-    body:
+    const title = payload.notification?.title || payload.data?.title || 'HER-SPACE Night Curfew Alert ⏰';
+    const body =
       payload.notification?.body ||
       payload.data?.body ||
-      'Night roll-call window is active (22:00 — 00:00 IST). Please confirm your presence.',
-    icon: '/icon-192.png',
-    badge: '/badge-72.png',
-    tag: 'her-space-curfew-reminder',
-    renotify: true,
-    data: {
-      url: payload.data?.url || '/student/dashboard',
-      timestamp: new Date().toISOString(),
-    },
-    actions: [
-      { action: 'checkin', title: "Confirm I'm IN" },
-      { action: 'view', title: 'Open Dashboard' },
-    ],
-  };
+      'Night roll-call window is active. Please confirm your presence on your device.';
 
-  self.registration.showNotification(title, options);
+    const options = {
+      body,
+      tag: payload.data?.tag || `her-space-curfew-${Date.now()}`,
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [400, 150, 400, 150, 400],
+      data: {
+        url: payload.data?.url || '/student/dashboard',
+        timestamp: new Date().toISOString(),
+      },
+    };
+
+    self.registration.showNotification(title, options);
+  });
+} catch (fbErr) {
+  console.warn('[HER-SPACE Service Worker] Offline mode / Firebase init fallback:', fbErr);
+}
+
+// Handle direct notification messages from the client web app
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
+    const { title, options } = event.data;
+    self.registration.showNotification(title, {
+      ...options,
+      vibrate: [400, 150, 400, 150, 400],
+      renotify: true,
+      requireInteraction: true,
+    });
+  }
 });
 
-// Handle notification click
+// Handle notification click: Open or focus student dashboard
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const targetUrl = event.notification.data?.url || '/';
+  const targetUrl = event.notification.data?.url || '/student/dashboard';
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
       // Focus existing tab if open
       for (const client of windowClients) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
@@ -67,8 +88,8 @@ self.addEventListener('notificationclick', (event) => {
         }
       }
       // Otherwise open new window
-      if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
       }
     })
   );

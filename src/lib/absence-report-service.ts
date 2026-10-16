@@ -108,35 +108,28 @@ export async function generateAbsenceReport(params: {
 
   const hostelDisplayName = params.hostelName || hostelId || 'HER-SPACE Hostel';
 
-  // 2. Format detailed text report
+  // 2. Format clean, compact text report (Scannable for large hostels with 200+ residents)
   let text = `🚨 *HER-SPACE HOSTEL ABSENCE REPORT*\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `🏢 *Hostel:* ${hostelDisplayName}\n`;
-  text += `⏰ *Curfew Reminder:* ${formatTime12(reminderSlot)} (Report dispatched +5 min: ${formatTime12(reportTriggerSlot)})\n`;
-  text += `📅 *Date:* ${sessionDate}\n`;
-  text += `⚠️ *Total Residents Currently OUT:* ${outStudents.length}\n`;
+  text += `🏢 *Hostel:* ${hostelDisplayName} | ⏰ *Curfew:* ${formatTime12(reminderSlot)}\n`;
+  text += `📅 *Date:* ${sessionDate} | ⚠️ *Total OUT:* ${outStudents.length}\n`;
   text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   if (outStudents.length === 0) {
-    text += `✅ *All residents are physically inside the hostel boundary.*\n`;
-    text += `Zero unverified absences at this post-reminder check.\n`;
+    text += `✅ *All residents are confirmed INSIDE the hostel.*\n`;
+    text += `Zero unverified absences at this check.\n`;
   } else {
-    text += `📋 *List of Absent / OUT Residents:*\n\n`;
+    text += `📋 *OUT Residents (${outStudents.length}):*\n`;
     outStudents.forEach((s, idx) => {
-      text += `${idx + 1}. *${s.name}*\n`;
-      text += `   • Room: ${s.room || 'N/A'} | ID: ${s.studentId || s.id}\n`;
-      text += `   • OUT Since: ${s.outTime || 'Earlier'}\n`;
-      text += `   • Reason / Destination: ${s.outReason || 'Not declared'}\n`;
-      text += `   • Expected Return: ${s.estimatedReturnTime || 'Pending response'}\n`;
-      text += `   • Student Phone: ${s.phone || 'N/A'}\n`;
-      text += `   • Parent Phone: ${s.guardianPhone || 'N/A'}\n\n`;
+      const rawPhone = (s.phone || '').replace(/[^0-9]/g, '');
+      const cleanPhone = rawPhone.length >= 10 ? `+91${rawPhone.slice(-10)}` : (s.phone || 'N/A');
+      text += `${idx + 1}. *${s.name}* | Rm: *${s.room || '—'}* | 📞 ${cleanPhone}\n`;
     });
+    text += `\n`;
   }
 
   text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `📞 Helpline: +91 6267549800\n`;
-  text += `📱 Administrative Monitor: +91 9399667720\n`;
-  text += `Verified by HER-SPACE Security System`;
+  text += `📞 Helpline: +916267549800 | 📱 Monitor: +919399667720\n`;
+  text += `Verified by HER-SPACE Security`;
 
   const reportId = `rep_${hostelId}_${sessionDate.replace(/-/g, '')}_${reminderSlot.replace(':', '')}`;
 
