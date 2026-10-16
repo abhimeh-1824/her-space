@@ -9,8 +9,7 @@
     "start": "next start",
     "lint": "tsc --noEmit",
     "test": "tsx src/tests/auth-security.test.ts && tsx src/tests/attendance-phase-d.test.ts && tsx src/tests/notification-phase-e.test.ts && tsx src/tests/hostel-settings-phase-g.test.ts && tsx src/tests/phase-h-acceptance.test.ts && tsx src/tests/simplified-attendance-workflow.test.ts",
-    "seed:admin": "tsx scripts/create-admin.ts",
-    "server": "tsx server.ts"
+    "seed:admin": "tsx scripts/create-admin.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
