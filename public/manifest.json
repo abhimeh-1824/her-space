@@ -1,0 +1,17 @@
+{
+  "name": "HER-SPACE — Hostel Night Attendance",
+  "short_name": "HER-SPACE",
+  "description": "Secure, privacy-first night roll-call & curfew management system",
+  "start_url": "/student/dashboard",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#7c3aed",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

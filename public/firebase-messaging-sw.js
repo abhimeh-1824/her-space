@@ -60,6 +60,38 @@ try {
   console.warn('[HER-SPACE Service Worker] Offline mode / Firebase init fallback:', fbErr);
 }
 
+// Handle standard Web Push / background push event when browser is closed
+self.addEventListener('push', (event) => {
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch {
+      data = { body: event.data.text() };
+    }
+  }
+
+  const title = data.title || data.notification?.title || '🚨 HER-SPACE Curfew Alert';
+  const body =
+    data.body ||
+    data.notification?.body ||
+    'Night roll-call verification is active. Please confirm your attendance.';
+
+  const options = {
+    body,
+    tag: data.tag || `her-space-alert-${Date.now()}`,
+    renotify: true,
+    requireInteraction: true,
+    vibrate: [400, 150, 400, 150, 400],
+    data: {
+      url: data.url || '/student/dashboard',
+      timestamp: Date.now(),
+    },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
 // Handle direct notification messages from the client web app
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
