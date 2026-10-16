@@ -190,6 +190,24 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
   const outCount = hostelScopedStudents.filter((s) => s.attendanceStatus === 'OUT').length;
   const pendingCount = hostelScopedStudents.filter((s) => s.attendanceStatus === 'Pending').length;
 
+  // Initial compilation so WhatsApp links are populated immediately
+  useEffect(() => {
+    if (!latestReport && hostelScopedStudents.length > 0) {
+      const activeH = authorizedHostels?.[0] || hostels?.[0];
+      const now = new Date();
+      const currentHH = String(now.getHours()).padStart(2, '0');
+      const currentMM = String(now.getMinutes()).padStart(2, '0');
+      generateAbsenceReport({
+        hostelId: activeH?.id || 'HST-HER-01',
+        hostelName: activeH?.name || 'HER-SPACE Hostel',
+        reminderSlot: `${currentHH}:${currentMM}`,
+        studentsList: hostelScopedStudents,
+      })
+        .then((rep) => setLatestReport(rep))
+        .catch(() => {});
+    }
+  }, [hostelScopedStudents, authorizedHostels, hostels, latestReport]);
+
   // Automated 5-min Post-Reminder Watcher
   useEffect(() => {
     if (typeof window === 'undefined') return;

@@ -211,12 +211,13 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
       try {
         const reg = await navigator.serviceWorker.ready;
         if (reg && reg.showNotification) {
-          await reg.showNotification(title, {
+          const notifOpts: Record<string, unknown> = {
             ...options,
-            icon: options.icon || '/icon-192.png',
-            badge: options.badge || '/badge-72.png',
             vibrate: [300, 100, 300, 100, 300],
-          } as any);
+          };
+          if (options.icon) notifOpts.icon = options.icon;
+          if (options.badge) notifOpts.badge = options.badge;
+          await reg.showNotification(title, notifOpts as NotificationOptions);
           return;
         }
       } catch (swErr) {
