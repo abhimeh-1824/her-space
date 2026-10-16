@@ -3,7 +3,7 @@ import { AppScreen, Student, Hostel } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { checkInResident, checkOutResident, recordEstimatedReturnTime } from '../../lib/attendance-service';
 import { getMockUserForRole } from '../../lib/auth';
-import { subscribeToHostels } from '../../lib/db-seed';
+import { subscribeToHostels, acknowledgeStudentAlertInDb } from '../../lib/db-seed';
 
 export interface StudentDashboardViewProps {
   student?: Student | null;
@@ -57,6 +57,13 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   const [outsideWarning, setOutsideWarning] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [pushPermission, setPushPermission] = useState<'default' | 'granted' | 'denied'>('default');
+  const [activeWardenAlert, setActiveWardenAlert] = useState<{
+    id: string;
+    title: string;
+    message: string;
+    sentAt: string;
+    senderName?: string;
+  } | null>(null);
 
   const activeHostel =
     liveHostels.find((h) => h.id === student?.hostelId) ||
@@ -126,6 +133,45 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
       setPushPermission(Notification.permission);
     }
   }, []);
+
+  // Real-time listener for direct warden alerts sent to this student
+  useEffect(() => {
+    if (!student?.pendingAlert) return;
+    const alert = student.pendingAlert;
+    if (alert.acknowledged) {
+      setActiveWardenAlert(null);
+      return;
+    }
+
+    const alertKey = `alert_ack_${student.id}_${alert.id}`;
+    if (typeof window !== 'undefined' && sessionStorage.getItem(alertKey)) return;
+
+    setActiveWardenAlert(alert);
+    playNotificationChime();
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate([400, 150, 400, 150, 400]);
+      } catch {}
+    }
+    triggerMobileNotification(alert.title || '🚨 Urgent Warden Alert', {
+      body: alert.message,
+      tag: `warden-alert-${alert.id}`,
+    });
+  }, [student?.pendingAlert]);
+
+  const handleAcknowledgeAlert = async () => {
+    if (!activeWardenAlert || !student) return;
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(`alert_ack_${student.id}_${activeWardenAlert.id}`, 'true');
+      }
+      await acknowledgeStudentAlertInDb(student.id);
+      setActiveWardenAlert(null);
+      showToast('Warden alert acknowledged.', 'info');
+    } catch {
+      setActiveWardenAlert(null);
+    }
+  };
 
   const playNotificationChime = () => {
     if (typeof window === 'undefined') return;
@@ -941,6 +987,45 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Warden Alert Modal */}
+      {activeWardenAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="bg-slate-800 border-2 border-red-500/80 rounded-3xl max-w-sm w-full p-6 text-white shadow-2xl relative space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-red-600/30 text-red-400 border border-red-500/50 flex items-center justify-center shrink-0 animate-bounce">
+                <span className="material-symbols-outlined text-2xl">campaign</span>
+              </div>
+              <div className="min-w-0">
+                <span className="inline-block px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 text-[10px] font-bold border border-red-500/40 uppercase tracking-wider">
+                  Direct Warden Alert
+                </span>
+                <h3 className="font-bold text-base text-white truncate mt-0.5">
+                  {activeWardenAlert.title || 'Curfew Roll-Call Alert'}
+                </h3>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-4 text-sm text-slate-200 leading-relaxed font-medium">
+              {activeWardenAlert.message}
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>From: <strong className="text-slate-300">{activeWardenAlert.senderName || 'Warden Administration'}</strong></span>
+              <span>{activeWardenAlert.sentAt ? new Date(activeWardenAlert.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAcknowledgeAlert}
+              className="w-full py-3 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-sm shadow-lg shadow-red-600/30 cursor-pointer flex items-center justify-center gap-2 transition-transform active:scale-95"
+            >
+              <span className="material-symbols-outlined text-lg">check_circle</span>
+              <span>I Acknowledge / Understood</span>
+            </button>
           </div>
         </div>
       )}

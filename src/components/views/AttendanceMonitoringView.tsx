@@ -2,11 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { AppScreen, Student, Hostel } from '../../types';
 import { exportAttendanceToCsv } from '../../lib/hostel-service';
 import { useAuth } from '../../context/AuthContext';
-import { subscribeToStudents, subscribeToHostels, updateStudentAttendanceInDb } from '../../lib/db-seed';
+import {
+  subscribeToStudents,
+  subscribeToHostels,
+  updateStudentAttendanceInDb,
+  sendDirectNotificationToStudent,
+} from '../../lib/db-seed';
 import {
   generateAbsenceReport,
   AbsenceReportData,
   addFiveMinutes,
+  formatTime12,
   REPORT_RECIPIENT_NUMBERS,
 } from '../../lib/absence-report-service';
 
@@ -43,6 +49,13 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
   const [latestReport, setLatestReport] = useState<AbsenceReportData | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [copiedReport, setCopiedReport] = useState(false);
+
+  // Student-wise direct notification
+  const [notifyStudentModal, setNotifyStudentModal] = useState<Student | null>(null);
+  const [alertTitle, setAlertTitle] = useState('🚨 Warden Curfew Alert');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [isSendingAlert, setIsSendingAlert] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -274,6 +287,74 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
     }
   };
 
+  const handleOpenNotifyModal = (stu: Student) => {
+    setNotifyStudentModal(stu);
+    setAlertTitle('🚨 Warden Roll-Call Alert');
+    if (stu.attendanceStatus === 'OUT') {
+      setAlertMessage(
+        `Urgent notice from Warden: You are currently marked OUT. Please return inside hostel premises immediately.`
+      );
+    } else {
+      setAlertMessage(
+        `Curfew Roll-Call Notice: Night attendance verification is active. Please confirm your presence on your dashboard.`
+      );
+    }
+  };
+
+  const handleSendAlertToStudent = async () => {
+    if (!notifyStudentModal) return;
+    setIsSendingAlert(true);
+    try {
+      await sendDirectNotificationToStudent({
+        studentDocId: notifyStudentModal.id,
+        title: alertTitle,
+        message: alertMessage,
+        senderName: user?.name || (isWarden ? 'Hostel Warden' : 'Administration'),
+      });
+      showToast(`Curfew alert notification sent directly to ${notifyStudentModal.name}'s phone!`);
+      setNotifyStudentModal(null);
+    } catch {
+      showToast('Error dispatching notification to student.');
+    } finally {
+      setIsSendingAlert(false);
+    }
+  };
+
+  const handleSendReportTillNow = async () => {
+    setIsGeneratingReport(true);
+    try {
+      const activeH = authorizedHostels?.[0] || hostels?.[0];
+      const now = new Date();
+      const currentHH = String(now.getHours()).padStart(2, '0');
+      const currentMM = String(now.getMinutes()).padStart(2, '0');
+      const currentTime = `${currentHH}:${currentMM}`;
+
+      const rep = await generateAbsenceReport({
+        hostelId: activeH?.id || 'HST-HER-01',
+        hostelName: activeH?.name || 'HER-SPACE Hostel',
+        reminderSlot: currentTime,
+        studentsList: hostelScopedStudents,
+      });
+      setLatestReport(rep);
+      setShowReportModal(true);
+      showToast(`Live Absence Report compiled: ${rep.totalOutCount} resident(s) currently OUT.`);
+    } catch {
+      showToast('Error generating live absence report.');
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
+  const handleCopyReportText = () => {
+    if (!latestReport) return;
+    try {
+      navigator.clipboard.writeText(latestReport.reportText);
+      setCopiedReport(true);
+      setTimeout(() => setCopiedReport(false), 2500);
+      showToast('Report text copied to clipboard!');
+    } catch {}
+  };
+
   return (
     <div className="bg-surface font-body-md text-on-surface antialiased min-h-screen flex flex-col pb-24 md:pb-8">
       {/* Toast Notification */}
@@ -326,6 +407,16 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
             >
               <span className="material-symbols-outlined text-[16px]">print</span>
               <span className="hidden sm:inline">Print Sheet</span>
+            </button>
+            <button
+              type="button"
+              disabled={!hasAssignedHostel || isGeneratingReport}
+              onClick={handleSendReportTillNow}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white text-xs font-bold shadow-sm transition-transform active:scale-95 cursor-pointer disabled:opacity-50"
+              title="Generate and send consolidated report of residents currently OUT"
+            >
+              <span className="material-symbols-outlined text-[16px]">outgoing_mail</span>
+              <span>{isGeneratingReport ? 'Compiling...' : 'Send Absence Report (Till Now)'}</span>
             </button>
           </div>
         </div>
@@ -621,11 +712,19 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
                     )}
                     <button
                       type="button"
+                      onClick={() => handleOpenNotifyModal(stu)}
+                      className="px-3 py-2 rounded-xl bg-violet-600/10 hover:bg-violet-600/20 text-violet-700 dark:text-violet-300 border border-violet-500/20 text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-sm">notifications_active</span>
+                      <span>Notify</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => {
                         setSelectedStudent(stu);
                         setIsAuditModalOpen(true);
                       }}
-                      className="px-4 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold cursor-pointer transition-colors"
+                      className="px-3 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold cursor-pointer transition-colors"
                     >
                       Note / Audit
                     </button>
@@ -722,6 +821,15 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
                             )}
                             <button
                               type="button"
+                              onClick={() => handleOpenNotifyModal(stu)}
+                              className="px-2.5 py-1 rounded-xl bg-violet-600/10 hover:bg-violet-600/20 text-violet-700 dark:text-violet-300 border border-violet-500/20 font-label-xs font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                              title="Send direct alert notification to student's phone"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">notifications_active</span>
+                              <span>Notify</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => {
                                 setSelectedStudent(stu);
                                 setIsAuditModalOpen(true);
@@ -807,16 +915,152 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
         </div>
       )}
 
-      {/* Absence Report Preview Modal */}
+      {/* Student-wise Direct Notification Modal */}
+      {notifyStudentModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="max-w-md w-full bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl p-6 text-white space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-violet-600/30 text-violet-400 border border-violet-500/40 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-xl">notifications_active</span>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Send Direct Notification</h3>
+                  <p className="text-xs text-slate-400">
+                    To: <strong className="text-violet-300">{notifyStudentModal.name}</strong> · Room {notifyStudentModal.room} ({notifyStudentModal.rollNo})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNotifyStudentModal(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            {/* Quick message presets */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                Quick Message Presets
+              </label>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAlertTitle('🚨 Urgent Curfew Alert');
+                    setAlertMessage(`Urgent notice from Warden: You are currently marked OUT. Return inside the hostel boundary immediately.`);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-left text-xs text-slate-200 border border-slate-700/80 cursor-pointer transition-colors"
+                >
+                  <strong className="text-amber-400">1. Curfew Return Warning:</strong> You are marked OUT. Return inside hostel immediately.
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAlertTitle('⏰ Declare Return Time');
+                    setAlertMessage(`Hostel Administration: Please open your HER-SPACE dashboard and declare your expected return time.`);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-left text-xs text-slate-200 border border-slate-700/80 cursor-pointer transition-colors"
+                >
+                  <strong className="text-sky-400">2. Return Time Query:</strong> Please declare expected return time on dashboard.
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAlertTitle('✅ Roll-Call Check');
+                    setAlertMessage(`Night roll-call verification is active. Please confirm your presence at your room now.`);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-left text-xs text-slate-200 border border-slate-700/80 cursor-pointer transition-colors"
+                >
+                  <strong className="text-emerald-400">3. Presence Verification:</strong> Roll-call is active. Confirm presence at room.
+                </button>
+              </div>
+            </div>
+
+            {/* Editable title and message */}
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Alert Title
+                </label>
+                <input
+                  type="text"
+                  value={alertTitle}
+                  onChange={(e) => setAlertTitle(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-violet-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Alert Message (Dispatched with Sound &amp; Vibration)
+                </label>
+                <textarea
+                  rows={3}
+                  value={alertMessage}
+                  onChange={(e) => setAlertMessage(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white outline-none focus:border-violet-500 resize-none leading-relaxed"
+                  placeholder="Type message for student..."
+                />
+              </div>
+            </div>
+
+            <div className="bg-violet-950/40 border border-violet-500/30 rounded-xl p-3 text-[11px] text-slate-300 flex items-center gap-2">
+              <span className="material-symbols-outlined text-violet-400 text-base shrink-0">vibration</span>
+              <span>Triggers an instant chime sound, vibration, and push alert on resident&apos;s phone.</span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-700">
+              <button
+                type="button"
+                onClick={() => setNotifyStudentModal(null)}
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 hover:text-white cursor-pointer text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSendingAlert || !alertMessage.trim()}
+                onClick={handleSendAlertToStudent}
+                className="px-5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs cursor-pointer shadow-md flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isSendingAlert ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Dispatching...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-sm">send</span>
+                    <span>Send Notification</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live Absence Report (Till Now) Preview Modal */}
       {showReportModal && latestReport && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-xs">
           <div className="max-w-xl w-full bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl p-6 text-white space-y-4">
             <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-amber-400">summarize</span>
-                <h3 className="font-bold text-base">5-Min Post-Curfew Absence Report</h3>
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-red-600/30 text-red-400 border border-red-500/40 flex items-center justify-center font-bold shrink-0">
+                  <span className="material-symbols-outlined text-xl">assignment_late</span>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Live Absence Report (Till Now)</h3>
+                  <p className="text-xs text-slate-400">
+                    Compiled at {formatTime12(latestReport.reminderSlot)} · Date: {latestReport.sessionDate}
+                  </p>
+                </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowReportModal(false)}
                 className="text-slate-400 hover:text-white cursor-pointer"
               >
@@ -824,21 +1068,45 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
               </button>
             </div>
 
-            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 font-mono text-xs text-slate-200 whitespace-pre-wrap max-h-72 overflow-y-auto">
+            {/* Total count summary banner */}
+            <div
+              className={`p-3.5 rounded-2xl border flex items-center gap-3 ${
+                latestReport.totalOutCount > 0
+                  ? 'bg-red-950/50 border-red-500/40 text-red-200'
+                  : 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+              }`}
+            >
+              <span className="material-symbols-outlined text-2xl">
+                {latestReport.totalOutCount > 0 ? 'warning' : 'verified'}
+              </span>
+              <div>
+                <p className="font-bold text-sm">
+                  {latestReport.totalOutCount > 0
+                    ? `${latestReport.totalOutCount} Resident(s) Currently Marked OUT`
+                    : 'All Residents Confirmed INSIDE Hostel'}
+                </p>
+                <p className="text-xs opacity-80">
+                  {latestReport.totalOutCount > 0
+                    ? 'Report ready for immediate WhatsApp dispatch to Helpline & Monitor.'
+                    : 'Zero unauthorized absences recorded up to this moment.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 font-mono text-xs text-slate-200 whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed">
               {latestReport.reportText}
             </div>
 
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-700 text-xs">
               <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(latestReport.reportText);
-                  showToast('Report copied to clipboard!');
-                }}
+                onClick={handleCopyReportText}
                 className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold cursor-pointer flex items-center gap-1.5 transition-colors"
               >
-                <span className="material-symbols-outlined text-sm">content_copy</span>
-                <span>Copy Full Text</span>
+                <span className="material-symbols-outlined text-sm">
+                  {copiedReport ? 'check' : 'content_copy'}
+                </span>
+                <span>{copiedReport ? 'Copied!' : 'Copy Full Text'}</span>
               </button>
 
               <div className="flex items-center gap-2">
@@ -846,7 +1114,7 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
                   href={latestReport.whatsappUrls['6267549800']}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold flex items-center gap-1.5 shadow-sm"
+                  className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold flex items-center gap-1.5 shadow-sm transition-colors"
                 >
                   <span className="material-symbols-outlined text-sm">send</span>
                   <span>WhatsApp 6267549800</span>
@@ -855,7 +1123,7 @@ export const AttendanceMonitoringView: React.FC<AttendanceMonitoringViewProps> =
                   href={latestReport.whatsappUrls['9399667720']}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 shadow-sm"
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 shadow-sm transition-colors"
                 >
                   <span className="material-symbols-outlined text-sm">send</span>
                   <span>WhatsApp 9399667720</span>

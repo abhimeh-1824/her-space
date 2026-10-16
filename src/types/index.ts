@@ -103,6 +103,15 @@ export interface Student {
   setupLink?: string;
   failedInAttemptCount?: number;
   lastFailedInAt?: string;
+  pendingAlert?: {
+    id: string;
+    title: string;
+    message: string;
+    sentAt: string;
+    senderName?: string;
+    acknowledged?: boolean;
+    acknowledgedAt?: string;
+  };
 }
 
 export interface LocationCapture {

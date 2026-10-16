@@ -658,6 +658,96 @@ export async function updateStudentEstimatedReturnTimeInDb(
   }
 }
 
+export async function sendDirectNotificationToStudent(params: {
+  studentDocId: string;
+  title: string;
+  message: string;
+  senderName?: string;
+}): Promise<void> {
+  const alertData = {
+    id: `alert_${Date.now()}`,
+    title: params.title || '🚨 Warden Roll-Call Alert',
+    message: params.message || 'Urgent notice: Please confirm your curfew attendance or return immediately.',
+    sentAt: new Date().toISOString(),
+    senderName: params.senderName || 'Warden Administration',
+    acknowledged: false,
+  };
+
+  const current = loadCachedStudents();
+  const sIdx = current.findIndex((s) => s.id === params.studentDocId);
+  if (sIdx >= 0) {
+    const updated = {
+      ...current[sIdx],
+      pendingAlert: alertData,
+      lastUpdated: `Alert sent at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+    };
+    const newList = current.map((s, i) => (i === sIdx ? updated : s));
+    saveCachedStudents(newList);
+    studentListeners.forEach((fn) => fn(newList));
+  }
+
+  try {
+    await setDoc(
+      doc(db, 'students', params.studentDocId),
+      {
+        pendingAlert: alertData,
+        lastUpdated: `Alert sent at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      },
+      { merge: true }
+    );
+    notifySyncBus('students');
+  } catch (err) {
+    console.error('[sendDirectNotificationToStudent] Firestore error:', err);
+  }
+
+  // Also log job to notificationJobs collection
+  try {
+    const jobId = `job_direct_${params.studentDocId}_${Date.now()}`;
+    await setDoc(doc(db, 'notificationJobs', jobId), {
+      id: jobId,
+      jobType: 'warden_direct_alert',
+      targetStudentId: params.studentDocId,
+      title: alertData.title,
+      body: alertData.message,
+      senderName: alertData.senderName,
+      status: 'dispatched',
+      createdAt: new Date().toISOString(),
+    });
+  } catch {}
+}
+
+export async function acknowledgeStudentAlertInDb(studentDocId: string): Promise<void> {
+  const current = loadCachedStudents();
+  const sIdx = current.findIndex((s) => s.id === studentDocId);
+  if (sIdx >= 0 && current[sIdx].pendingAlert) {
+    const updated = {
+      ...current[sIdx],
+      pendingAlert: {
+        ...current[sIdx].pendingAlert!,
+        acknowledged: true,
+        acknowledgedAt: new Date().toISOString(),
+      },
+    };
+    const newList = current.map((s, i) => (i === sIdx ? updated : s));
+    saveCachedStudents(newList);
+    studentListeners.forEach((fn) => fn(newList));
+  }
+
+  try {
+    await setDoc(
+      doc(db, 'students', studentDocId),
+      {
+        'pendingAlert.acknowledged': true,
+        'pendingAlert.acknowledgedAt': new Date().toISOString(),
+      },
+      { merge: true }
+    );
+    notifySyncBus('students');
+  } catch (err) {
+    console.error('[acknowledgeStudentAlertInDb] Firestore error:', err);
+  }
+}
+
 // -------------------------------------------------------------
 // EXTENSIONS, ATTENDANCE & AUDIT LOGS (Zero Firestore Overhead)
 // -------------------------------------------------------------
