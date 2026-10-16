@@ -361,45 +361,6 @@ export const LocationSetupView: React.FC<LocationSetupViewProps> = ({ onNavigate
           </button>
         </div>
       </main>
-
-      {/* Bottom Nav */}
-      <nav className="fixed bottom-0 w-full z-40 pb-safe bg-surface-container-lowest/90 backdrop-blur-xl border-t border-outline-variant/30">
-        <div className="flex items-center justify-around h-16 max-w-md mx-auto px-1">
-          <button
-            type="button"
-            onClick={() => onNavigate('student-dashboard')}
-            className="flex flex-col items-center justify-center gap-1 w-16 h-12 text-secondary hover:text-on-surface transition-colors cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[22px]">dashboard</span>
-            <span className="font-label-xs text-label-xs">Home</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('attendance-history')}
-            className="flex flex-col items-center justify-center gap-1 w-16 h-12 text-secondary hover:text-on-surface transition-colors cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[22px]">history</span>
-            <span className="font-label-xs text-label-xs">History</span>
-          </button>
-          <button
-            type="button"
-            className="flex flex-col items-center justify-center gap-1 w-16 h-12 text-primary font-bold"
-          >
-            <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-              settings
-            </span>
-            <span className="font-label-xs text-label-xs">Setup</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('terms-privacy')}
-            className="flex flex-col items-center justify-center gap-1 w-16 h-12 text-secondary hover:text-on-surface transition-colors cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[22px]">security</span>
-            <span className="font-label-xs text-label-xs">Privacy</span>
-          </button>
-        </div>
-      </nav>
     </div>
   );
 };

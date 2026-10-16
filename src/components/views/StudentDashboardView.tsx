@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { AppScreen, Student } from '../../types';
+import { AppScreen, Student, Hostel } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { checkInResident, checkOutResident, recordEstimatedReturnTime } from '../../lib/attendance-service';
 import { getMockUserForRole } from '../../lib/auth';
+import { subscribeToHostels } from '../../lib/db-seed';
 
 export interface StudentDashboardViewProps {
   student?: Student | null;
@@ -15,12 +16,22 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   onNavigate,
   onUpdateAttendance,
 }) => {
-  const { user, logout, authorizedHostels } = useAuth();
+  const { user, logout, authorizedHostels, availableHostels } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showOutModal, setShowOutModal] = useState(false);
   const [outReason, setOutReason] = useState('');
 
   const todayDateStr = new Date().toISOString().slice(0, 10);
+
+  // Live subscribed hostels (so changes from warden are instantly received)
+  const [liveHostels, setLiveHostels] = useState<Hostel[]>(availableHostels || []);
+
+  useEffect(() => {
+    const unsub = subscribeToHostels((hList) => {
+      setLiveHostels(hList);
+    });
+    return () => unsub();
+  }, []);
 
   // Return date & time states for card
   const [returnDateInput, setReturnDateInput] = useState(() => {
@@ -47,7 +58,11 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [pushPermission, setPushPermission] = useState<'default' | 'granted' | 'denied'>('default');
 
-  const activeHostel = (authorizedHostels || []).find((h) => h.id === student?.hostelId) || authorizedHostels?.[0];
+  const activeHostel =
+    liveHostels.find((h) => h.id === student?.hostelId) ||
+    (authorizedHostels || []).find((h) => h.id === student?.hostelId) ||
+    liveHostels[0] ||
+    authorizedHostels?.[0];
 
   const formatTimeDisplay = (timeVal: string) => {
     if (!timeVal) return '';
@@ -112,7 +127,82 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
     }
   }, []);
 
+  const playNotificationChime = () => {
+    if (typeof window === 'undefined') return;
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1); // A5
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch {}
+  };
+
+  const matchesCurfewSlot = (slot: string, date: Date): boolean => {
+    if (!slot) return false;
+
+    const currentHH = date.getHours();
+    const currentMM = date.getMinutes();
+    const currentMMStr = String(currentMM).padStart(2, '0');
+    const currentHH24Str = String(currentHH).padStart(2, '0');
+    const time24 = `${currentHH24Str}:${currentMMStr}`; // e.g. "19:50"
+
+    const current12Hour = currentHH % 12 || 12;
+    const time12NoPad = `${current12Hour}:${currentMMStr}`; // e.g. "7:50"
+    const time12Padded = `${String(current12Hour).padStart(2, '0')}:${currentMMStr}`; // e.g. "07:50"
+
+    const cleanSlot = slot.trim().toLowerCase();
+
+    // 1. Direct match with 24-hr ("19:50" === "19:50")
+    if (cleanSlot === time24) return true;
+
+    // 2. Direct match with 12-hr ("7:50" === "7:50" or "07:50" === "07:50")
+    if (cleanSlot === time12NoPad || cleanSlot === time12Padded) return true;
+
+    // 3. Match with AM/PM (e.g. "7:50 pm" or "07:50 pm")
+    const ampm = currentHH >= 12 ? 'pm' : 'am';
+    if (cleanSlot.includes(ampm)) {
+      const withoutAmpm = cleanSlot.replace(ampm, '').trim();
+      if (withoutAmpm === time12NoPad || withoutAmpm === time12Padded || withoutAmpm === time24) {
+        return true;
+      }
+    }
+
+    // 4. Evening equivalence: if current time is evening (hour >= 12, e.g. 7:50 PM = 19:50)
+    // and user entered "7:50" or "07:50" (without PM) in the time input
+    const parts = slot.split(':');
+    if (parts.length >= 2) {
+      const sHour = parseInt(parts[0], 10);
+      const sMin = parseInt(parts[1].replace(/[^0-9]/g, ''), 10);
+      if (!isNaN(sHour) && !isNaN(sMin)) {
+        if (sMin === currentMM) {
+          if (sHour === currentHH) return true;
+          if (sHour === current12Hour) return true;
+          if (sHour + 12 === currentHH) return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
   const triggerMobileNotification = async (title: string, options: NotificationOptions) => {
+    playNotificationChime();
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate([300, 100, 300, 100, 300]);
+      } catch {}
+    }
+
     if (typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
 
@@ -125,7 +215,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
             ...options,
             icon: options.icon || '/icon-192.png',
             badge: options.badge || '/badge-72.png',
-            vibrate: [200, 100, 200],
+            vibrate: [300, 100, 300, 100, 300],
           } as any);
           return;
         }
@@ -174,19 +264,18 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
         body: 'Curfew roll-call alerts are working successfully on this device!',
         tag: 'her-space-test',
       });
-      showToast('Test notification dispatched to your device!', 'success');
+      showToast('Test notification dispatched with sound & vibration!', 'success');
     } catch {
       showToast('Could not dispatch test notification.', 'error');
     }
   };
 
-  // Live in-browser reminder watcher for configured curfew times (e.g. 7:05 PM / 19:05)
+  // Live in-browser reminder watcher for configured curfew times (e.g. 7:50, 7:52, 7:55, 22:00, etc.)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const interval = setInterval(() => {
-      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-      if (!student || student.attendanceStatus === 'IN') return;
+      if (!student) return;
 
       const now = new Date();
       const currentHH = String(now.getHours()).padStart(2, '0');
@@ -196,19 +285,32 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
       const schedule = [
         activeHostel?.curfewStart,
         ...(activeHostel?.reminderSchedule || []),
+        activeHostel?.reminder1,
+        activeHostel?.reminder2,
+        activeHostel?.reminder3,
       ].filter(Boolean) as string[];
 
-      if (schedule.includes(timeStr)) {
+      // Check if any scheduled slot matches the current minute
+      const matchedSlot = schedule.find((slot) => matchesCurfewSlot(slot, now));
+
+      if (matchedSlot) {
         const notifKey = `curfew_alert_${student.id}_${timeStr}_${now.toISOString().slice(0, 10)}`;
         if (!sessionStorage.getItem(notifKey)) {
           sessionStorage.setItem(notifKey, 'true');
+          const isOut = student.attendanceStatus === 'OUT';
+          const alertBody = isOut
+            ? `Night roll-call reminder (${formatTimeDisplay(matchedSlot)}): You are currently marked OUT. Please return inside hostel boundary.`
+            : `Night roll-call reminder (${formatTimeDisplay(matchedSlot)}): Roll-call is active. Your attendance is confirmed IN.`;
+
           triggerMobileNotification('HER-SPACE Curfew Alert ⏰', {
-            body: `Night roll-call reminder (${timeStr}): Please confirm your presence inside hostel boundary.`,
-            tag: `curfew-${timeStr}`,
+            body: alertBody,
+            tag: `curfew-${matchedSlot}`,
           });
+
+          showToast(alertBody, isOut ? 'error' : 'info');
         }
       }
-    }, 20000);
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [student, activeHostel]);
