@@ -112,6 +112,35 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
     }
   }, []);
 
+  const triggerMobileNotification = async (title: string, options: NotificationOptions) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    // Mobile Android Chrome strictly requires ServiceWorkerRegistration.showNotification()
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        if (reg && reg.showNotification) {
+          await reg.showNotification(title, {
+            ...options,
+            icon: options.icon || '/icon-192.png',
+            badge: options.badge || '/badge-72.png',
+            vibrate: [200, 100, 200],
+          } as any);
+          return;
+        }
+      } catch (swErr) {
+        console.warn('[Notification] ServiceWorker ready fallback:', swErr);
+      }
+    }
+
+    try {
+      new Notification(title, options);
+    } catch (winErr) {
+      console.warn('[Notification] Window notification fallback:', winErr);
+    }
+  };
+
   const handleRequestPushPermission = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
       showToast('Notifications are not supported by this browser.', 'info');
@@ -122,14 +151,32 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
       setPushPermission(res);
       if (res === 'granted') {
         if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('/firebase-messaging-sw.js').catch(() => {});
+          try {
+            await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+          } catch {}
         }
+        await triggerMobileNotification('HER-SPACE Curfew Alerts Enabled ✅', {
+          body: 'Night roll-call notifications are now active on your mobile phone.',
+          tag: 'her-space-enabled',
+        });
         showToast('Push notifications enabled for curfew alerts!', 'success');
       } else {
         showToast('Notification permission denied in browser settings.', 'error');
       }
     } catch {
       showToast('Error requesting notification permission.', 'error');
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    try {
+      await triggerMobileNotification('HER-SPACE Test Alert 🔔', {
+        body: 'Curfew roll-call alerts are working successfully on this device!',
+        tag: 'her-space-test',
+      });
+      showToast('Test notification dispatched to your device!', 'success');
+    } catch {
+      showToast('Could not dispatch test notification.', 'error');
     }
   };
 
@@ -155,13 +202,10 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
         const notifKey = `curfew_alert_${student.id}_${timeStr}_${now.toISOString().slice(0, 10)}`;
         if (!sessionStorage.getItem(notifKey)) {
           sessionStorage.setItem(notifKey, 'true');
-          try {
-            new Notification('HER-SPACE Curfew Alert', {
-              body: `Night roll-call reminder (${timeStr}): Please confirm your presence inside hostel boundary.`,
-              icon: '/icon-192.png',
-              tag: `curfew-${timeStr}`,
-            });
-          } catch {}
+          triggerMobileNotification('HER-SPACE Curfew Alert ⏰', {
+            body: `Night roll-call reminder (${timeStr}): Please confirm your presence inside hostel boundary.`,
+            tag: `curfew-${timeStr}`,
+          });
         }
       }
     }, 20000);
@@ -422,7 +466,7 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           </div>
 
           {/* Notification Permission Card */}
-          {pushPermission !== 'granted' && (
+          {pushPermission !== 'granted' ? (
             <div className="bg-gradient-to-r from-violet-950/70 to-indigo-950/70 border border-violet-500/30 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs shadow-lg">
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="material-symbols-outlined text-violet-400 text-xl shrink-0">notifications_active</span>
@@ -437,6 +481,23 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
                 className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs shrink-0 cursor-pointer shadow-md transition-colors"
               >
                 Enable
+              </button>
+            </div>
+          ) : (
+            <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3 flex items-center justify-between gap-3 text-xs shadow-md">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-emerald-400 text-base shrink-0">check_circle</span>
+                <div className="min-w-0">
+                  <p className="font-semibold text-white text-[12px]">Curfew Alerts Active</p>
+                  <p className="text-[10px] text-slate-400">Mobile notifications enabled for this session</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSendTestNotification}
+                className="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-medium shrink-0 cursor-pointer transition-colors"
+              >
+                Test Alert
               </button>
             </div>
           )}
