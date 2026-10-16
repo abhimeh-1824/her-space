@@ -8,7 +8,7 @@ export interface LoginViewProps {
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onNavigate, onLogin }) => {
-  const { login, resetPassword, clearError } = useAuth();
+  const { login, clearError } = useAuth();
 
   // Sign In Form State (Unified Single Login)
   const [email, setEmail] = useState('');
@@ -17,11 +17,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onNavigate, onLogin }) => 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  // Password Reset Modal
+  // Password Reset Policy Modal
   const [showResetModal, setShowResetModal] = useState(false);
-  const [resetEmail, setResetEmail] = useState('');
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetToast, setResetToast] = useState<string | null>(null);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,25 +47,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onNavigate, onLogin }) => 
       setLocalError(msg);
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!resetEmail.trim()) return;
-    setResetLoading(true);
-    try {
-      await resetPassword(resetEmail.trim());
-      setResetToast('Password reset link sent to your registered email.');
-      setTimeout(() => {
-        setShowResetModal(false);
-        setResetToast(null);
-        setResetEmail('');
-      }, 3000);
-    } catch (err: unknown) {
-      setResetToast(err instanceof Error ? err.message : 'Failed to send reset link.');
-    } finally {
-      setResetLoading(false);
     }
   };
 
@@ -186,54 +164,77 @@ export const LoginView: React.FC<LoginViewProps> = ({ onNavigate, onLogin }) => 
         </button>
       </footer>
 
-      {/* Forgot Password Modal */}
+      {/* Password Reset Policy Notice Modal */}
       {showResetModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-sm text-white">Reset Account Password</h3>
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl relative overflow-hidden">
+            {/* Ambient accent */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+
+            <div className="flex items-start justify-between mb-4 relative z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shadow-inner">
+                  <span className="material-symbols-outlined text-2xl">admin_panel_settings</span>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Password Reset Policy</h3>
+                  <p className="text-xs text-amber-400/90 font-medium">Self-Service Reset Disabled</p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowResetModal(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                aria-label="Close"
               >
-                <span className="material-symbols-outlined text-base">close</span>
+                <span className="material-symbols-outlined text-lg">close</span>
               </button>
             </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Enter your registered institutional email to receive a secure password reset link.
-            </p>
-            {resetToast && (
-              <div className="mb-4 p-2.5 rounded-lg bg-violet-500/10 border border-violet-500/30 text-xs text-violet-300">
-                {resetToast}
+
+            {/* Information Notice */}
+            <div className="space-y-3.5 mb-6 text-xs text-slate-300 relative z-10 leading-relaxed">
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-200">
+                <p className="font-medium">
+                  Hostel security protocols require verified identification before account access or password changes can occur.
+                </p>
               </div>
-            )}
-            <form onSubmit={handleResetPassword} className="space-y-4">
-              <input
-                type="email"
-                required
-                value={resetEmail}
-                onChange={(e) => setResetEmail(e.target.value)}
-                placeholder="name@herspace.app"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-violet-500"
-              />
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowResetModal(false)}
-                  className="px-3.5 py-2 rounded-xl text-xs text-slate-400 hover:text-white hover:bg-slate-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={resetLoading}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-60"
-                >
-                  {resetLoading ? 'Sending...' : 'Send Reset Link'}
-                </button>
+
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+                <div className="font-semibold text-slate-200 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-violet-400 text-sm">vpn_key</span>
+                  <span>How to get your access link:</span>
+                </div>
+                <ul className="space-y-2 text-slate-400 pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-1.5 shrink-0" />
+                    <span>Contact your <strong>Assigned Hostel Warden</strong> or <strong>Super Admin</strong>.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-1.5 shrink-0" />
+                    <span>Provide your registered <strong>Student ID</strong> or Room Number.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-1.5 shrink-0" />
+                    <span>The Warden will click <strong>&quot;Regenerate Link&quot;</strong> in the roster dashboard to issue an official, single-use 48-hour password setup link for you.</span>
+                  </li>
+                </ul>
               </div>
-            </form>
+
+              <p className="text-[11px] text-slate-500 text-center">
+                This prevents unauthorized device takeovers and ensures student curfew safety.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 relative z-10">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 shadow-lg shadow-violet-600/25 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>Understood</span>
+                <span className="material-symbols-outlined text-sm">check</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
