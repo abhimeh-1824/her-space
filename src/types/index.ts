@@ -1,13 +1,37 @@
 export type AppScreen =
   | 'login'
+  | 'admin-dashboard'
+  | 'warden-dashboard'
+  | 'hostel-registration'
+  | 'warden-assignment'
+  | 'student-management'
+  | 'resident-setup'
   | 'student-dashboard'
   | 'location-setup'
   | 'attendance-history'
-  | 'warden-dashboard'
-  | 'student-management'
   | 'attendance-monitoring'
   | 'hostel-settings'
   | 'terms-privacy';
+
+export type AppView = AppScreen;
+
+export interface InvitationToken {
+  id: string; // Token doc ID (hash or uuid)
+  token: string; // Plain token for link generation (short-lived)
+  tokenHash: string; // Secure SHA-256 hash stored in Firestore
+  residentId: string; // e.g. STU-102
+  residentDocId: string;
+  hostelId: string;
+  name: string;
+  emailOrPhone: string;
+  roomNumber: string;
+  role: 'student';
+  status: 'pending' | 'used' | 'expired';
+  expiresAt: string; // ISO timestamp
+  createdAt: string; // ISO timestamp
+  usedAt?: string;
+  createdBy: string;
+}
 
 export type UserRole = 'student' | 'warden' | 'super_admin';
 
@@ -38,6 +62,7 @@ export interface UserProfile {
   consentAcceptedAt?: string;
   phone?: string;
   avatarUrl?: string;
+  roomNumber?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -70,6 +95,14 @@ export interface Student {
   avatarUrl?: string;
   avatarInitials: string;
   notes?: string;
+  estimatedReturnTime?: string;
+  estimatedReturnTimeSubmittedAt?: string;
+  outReason?: string;
+  invitationStatus?: 'pending' | 'completed' | 'expired';
+  invitationTokenId?: string;
+  setupLink?: string;
+  failedInAttemptCount?: number;
+  lastFailedInAt?: string;
 }
 
 export interface LocationCapture {
@@ -116,6 +149,10 @@ export interface AttendanceRecord {
   location?: LocationCapture;
   isWithinGeofence?: boolean;
   distanceFromHostelMeters?: number;
+  estimatedReturnTime?: string;
+  estimatedReturnTimeSubmittedAt?: string;
+  outReason?: string;
+  isFailedInAttempt?: boolean;
 }
 
 export interface CurfewExtension {
@@ -136,16 +173,30 @@ export interface CurfewExtension {
 export interface Hostel {
   id: string;
   name: string;
-  jurisdictionCode: string;
-  tenancyNode: string;
-  capacity: number;
-  totalStudents: number;
-  activeShift: string;
+  address?: string;
+  jurisdictionCode?: string;
+  tenancyNode?: string;
+  capacity?: number;
+  totalStudents?: number;
+  activeShift?: string;
   curfewStart?: string;
   curfewEnd?: string;
   geofenceLatitude?: number;
   geofenceLongitude?: number;
   geofenceRadiusMeters?: number;
+  timezone?: string; // e.g. "Asia/Kolkata"
+  reminderSchedule?: string[]; // e.g. ["22:00", "22:15", "22:30", "23:00", "23:30"]
+  wardenIds?: string[];
+  wardenEmail?: string;
+  wardenName?: string;
+  wardenPhone?: string;
+  curfewTime?: string;
+  reminder1?: string;
+  reminder2?: string;
+  reminder3?: string;
+  allowExtensions?: boolean;
+  maxExtensionMins?: number;
+  status?: 'active' | 'inactive';
 }
 
 export interface AuditLogEntry {
@@ -290,6 +341,7 @@ export interface HostelSettings {
   windowOpen: string; // e.g. "22:00"
   reminder1: string;  // e.g. "22:15"
   reminder2: string;  // e.g. "23:00"
+  reminder3?: string; // e.g. "23:30"
   curfewCutoff: string; // e.g. "00:00"
   lateProtocol: 'warden-req' | 'auto-log' | 'strict-lock';
   missingProtocol: 'physical' | 'call-parent' | 'security-dispatch';

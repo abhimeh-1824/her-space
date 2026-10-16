@@ -6,15 +6,25 @@
 import { LocationCapture, Hostel } from '../types';
 
 export const DEFAULT_HOSTEL_COORDINATES: Record<string, { lat: number; lng: number; radiusMeters: number }> = {
+  'HST-HER-01': {
+    lat: 31.9578,
+    lng: 77.1095,
+    radiusMeters: 200, // HER-SPACE Main Residency
+  },
+  'HST-HER-02': {
+    lat: 31.9592,
+    lng: 77.111,
+    radiusMeters: 150, // HER-SPACE South Wing
+  },
   'HST-SUN-01': {
     lat: 31.9578,
     lng: 77.1095,
-    radiusMeters: 200, // Sunrise Boys Hostel
+    radiusMeters: 200, // HER-SPACE Campus Block A
   },
   'HST-ANN-02': {
     lat: 31.9592,
     lng: 77.111,
-    radiusMeters: 150, // Sunrise Annex Block C
+    radiusMeters: 150, // HER-SPACE Campus Block B
   },
 };
 

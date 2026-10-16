@@ -19,17 +19,19 @@ import {
   RegisterParams,
   LoginParams,
 } from '../lib/auth-service';
-import { INITIAL_HOSTELS } from '../data/mockData';
 import { ensureDatabaseSeeded, subscribeToHostels } from '../lib/db-seed';
+import { validateUserProfile } from '@/lib/auth-guard';
 
 interface AuthContextType {
   user: UserProfile | null;
   role: UserRole;
   activeHostelId: string;
-  activeHostel: Hostel;
+  activeHostel: Hostel | null;
   availableHostels: Hostel[];
+  authorizedHostels: Hostel[];
   isAuthenticated: boolean;
   isLoading: boolean;
+  isInitialized: boolean;
   error: string | null;
   login: (params: LoginParams) => Promise<UserProfile>;
   register: (params: RegisterParams) => Promise<UserProfile>;
@@ -51,20 +53,35 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const LOCAL_STORAGE_USER_KEY = 'hostelguard_active_user';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(() => {
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [activeHostelId, setActiveHostelId] = useState<string>('');
+  const [availableHostels, setAvailableHostels] = useState<Hostel[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  // Hydrate user session from localStorage on client mount (prevents SSR hydration mismatch and anti-tamper)
+  useEffect(() => {
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
       if (stored) {
-        return JSON.parse(stored) as UserProfile;
+        const raw = JSON.parse(stored);
+        const profile = validateUserProfile(raw);
+        if (profile) {
+          setUser(profile);
+          // If the profile role was tampered and downgraded, re-sync to localStorage
+          if (profile.role !== raw.role) {
+            localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(profile));
+          }
+          if (profile.hostelId) {
+            setActiveHostelId(profile.hostelId);
+          }
+        } else {
+          localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+        }
       }
     } catch {}
-    return null;
-  });
-
-  const [activeHostelId, setActiveHostelId] = useState<string>(() => user?.hostelId || 'HST-SUN-01');
-  const [availableHostels, setAvailableHostels] = useState<Hostel[]>(INITIAL_HOSTELS);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+    setIsInitialized(true);
+  }, []);
 
   // Initialize DB and subscribe to live hostels
   useEffect(() => {
@@ -73,9 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     const unsubscribeHostels = subscribeToHostels((liveHostels) => {
-      if (liveHostels.length > 0) {
-        setAvailableHostels(liveHostels);
-      }
+      setAvailableHostels(liveHostels);
     });
 
     return () => {
@@ -101,13 +116,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.error('[AuthContext] Error loading user profile:', err);
         }
       }
+      setIsInitialized(true);
     });
 
     return () => unsubscribe();
   }, []);
 
+  // Strict authorized hostels calculation based on role:
+  // - super_admin: sees all registered hostels
+  // - warden: ONLY sees hostels explicitly assigned to them (user.hostelMemberships or user.hostelId)
+  // - student: ONLY sees their assigned primary hostel (user.hostelId)
+  const authorizedHostels = React.useMemo(() => {
+    if (!user) return [];
+    if (user.role === 'super_admin') return availableHostels;
+    if (user.role === 'warden') {
+      const assignedIds = new Set<string>();
+      if (Array.isArray(user.hostelMemberships)) {
+        user.hostelMemberships.forEach((id) => {
+          if (id && typeof id === 'string' && id.trim()) {
+            assignedIds.add(id.trim());
+          }
+        });
+      } else if (user.hostelId && user.hostelId.trim()) {
+        assignedIds.add(user.hostelId.trim());
+      }
+      return availableHostels.filter((h) => assignedIds.has(h.id));
+    }
+    if (user.role === 'student') {
+      if (!user.hostelId) return [];
+      return availableHostels.filter((h) => h.id === user.hostelId);
+    }
+    return [];
+  }, [user, availableHostels]);
+
+  // Synchronize activeHostelId with authorizedHostels
+  useEffect(() => {
+    if (!user) return;
+    if (authorizedHostels.length === 0) {
+      if (activeHostelId !== '') setActiveHostelId('');
+    } else if (!authorizedHostels.some((h) => h.id === activeHostelId)) {
+      setActiveHostelId(authorizedHostels[0].id);
+    }
+  }, [user, authorizedHostels, activeHostelId]);
+
   const activeHostel =
-    availableHostels.find((h) => h.id === activeHostelId) || availableHostels[0] || INITIAL_HOSTELS[0];
+    authorizedHostels.find((h) => h.id === activeHostelId) ||
+    (authorizedHostels.length > 0 ? authorizedHostels[0] : null);
 
   const clearError = () => setError(null);
 
@@ -229,8 +283,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     activeHostelId,
     activeHostel,
     availableHostels,
+    authorizedHostels,
     isAuthenticated: !!user,
     isLoading,
+    isInitialized,
     error,
     login,
     register,

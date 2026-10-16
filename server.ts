@@ -8,14 +8,15 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { schedulerRouter } from './src/api/schedulerRouter';
+import { config } from './src/lib/config';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || '3000', 10);
-  const isProd = process.env.NODE_ENV === 'production';
+  const PORT = config.server.port;
+  const isProd = config.server.isProduction;
 
   app.use(express.json());
 

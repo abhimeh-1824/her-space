@@ -6,15 +6,15 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { config } from './config';
 import { handleFirestoreError } from './errors';
 import { OperationType } from '../types';
 
-// Initialize Firebase App instance
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Initialize Firebase App instance using central environment configuration
+const app = !getApps().length ? initializeApp(config.firebase) : getApp();
 
-// CRITICAL: Must pass databaseId from firebase-applet-config.json
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// CRITICAL: Must pass databaseId from config
+export const db = getFirestore(app, config.firebase.firestoreDatabaseId);
 export const auth = getAuth(app);
 
 /**

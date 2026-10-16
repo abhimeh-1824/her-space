@@ -33,9 +33,10 @@ export interface CheckInRequest {
 export interface CheckInResult {
   record: AttendanceRecord;
   isIdempotentReplay: boolean;
-  status: 'Confirmed IN' | 'Late Check-in' | 'Exception Override';
+  status: 'Confirmed IN' | 'Late Check-in' | 'Exception Override' | 'Declared OUT';
   distanceMeters: number;
   message: string;
+  isOutsideRadius?: boolean;
 }
 
 export interface CheckOutRequest {
@@ -59,7 +60,7 @@ export interface CurfewExtensionRequest {
 }
 
 /**
- * Creates an immutable Audit Log Entry
+ * Creates an immutable Audit Log Entry (Stored locally to preserve Firebase Free Spark quota)
  */
 export async function logAuditEvent(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>): Promise<AuditLogEntry> {
   const auditId = `aud_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -71,13 +72,12 @@ export async function logAuditEvent(entry: Omit<AuditLogEntry, 'id' | 'timestamp
     ...entry,
   };
 
-  try {
-    await setDoc(doc(db, 'audit_logs', auditId), {
-      ...fullEntry,
-      serverCreatedAt: serverTimestamp(),
-    });
-  } catch (err) {
-    console.warn('[AuditLogger] Fallback log local recording:', err);
+  if (typeof window !== 'undefined') {
+    try {
+      const existing = JSON.parse(localStorage.getItem('herspace_audit_logs') || '[]');
+      const updated = [fullEntry, ...existing].slice(0, 50);
+      localStorage.setItem('herspace_audit_logs', JSON.stringify(updated));
+    } catch {}
   }
 
   return fullEntry;
@@ -112,7 +112,7 @@ export async function checkInResident(req: CheckInRequest): Promise<CheckInResul
   // 3. Location Capture & Geofence Verification
   const geofenceResult = validateLocationCapture(location, {
     id: hostelId,
-    name: 'Sunrise Hostel',
+    name: 'HER-SPACE Hostel',
     jurisdictionCode: hostelId,
     tenancyNode: 'NODE-01',
     capacity: 120,
@@ -120,14 +120,54 @@ export async function checkInResident(req: CheckInRequest): Promise<CheckInResul
     activeShift: 'Night Shift',
   });
 
-  if (!geofenceResult.isValid && !forceManualAuditOverride) {
-    throw new ValidationError(
-      `Location Check Failed: ${geofenceResult.message}`
-    );
+  const now = new Date();
+  const timeFormatted = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const refId = `#ATT-${sessionDate.replace(/-/g, '')}-${studentId}`;
+
+  // Flow E: If resident is outside permitted radius, record failed attempt, keep status OUT, and warn
+  if (!geofenceResult.isWithinGeofence && !forceManualAuditOverride) {
+    try {
+      await updateDoc(doc(db, 'students', studentDocId), {
+        attendanceStatus: 'OUT',
+        lastFailedInAt: now.toISOString(),
+        lastLocationSnapshot: location.address || `Outside campus boundary (±${location.accuracyMeters}m)`,
+        locationAccuracy: `±${location.accuracyMeters}m`,
+        lastUpdated: `Failed IN attempt (${timeFormatted})`,
+      });
+    } catch (err) {
+      console.warn('[CheckIn] Failed attempt recording note:', err);
+    }
+
+    const failedRecord: AttendanceRecord = {
+      id: `att_${studentDocId}_${sessionDate}`,
+      refId,
+      studentId: studentDocId,
+      hostelId,
+      date: sessionDate,
+      status: 'Declared OUT',
+      confirmationTime: timeFormatted,
+      capturedAddress: location.address || `Outside campus boundary (±${location.accuracyMeters}m)`,
+      accuracy: `±${location.accuracyMeters}m`,
+      method: 'GPS Geofence Rejected',
+      notes: 'Outside permitted check-in radius',
+      createdAt: now.toISOString(),
+      location,
+      isWithinGeofence: false,
+      distanceFromHostelMeters: geofenceResult.distanceMeters,
+      isFailedInAttempt: true,
+    };
+
+    return {
+      record: failedRecord,
+      isIdempotentReplay: false,
+      status: 'Declared OUT',
+      isOutsideRadius: true,
+      distanceMeters: geofenceResult.distanceMeters,
+      message: "You appear to be outside your hostel's permitted check-in area. Your attendance status has not changed. Please return to the hostel and try again.",
+    };
   }
 
   // 4. Server-Authoritative Time & Midnight Window Evaluation
-  const now = new Date();
   const window = calculateCurfewWindow(sessionDate, '22:00', '00:00', 0);
   const evaluation = evaluateCurfewStatus(now, window);
 
@@ -137,9 +177,6 @@ export async function checkInResident(req: CheckInRequest): Promise<CheckInResul
   } else if (evaluation.isLate) {
     finalStatus = 'Late Check-in';
   }
-
-  const timeFormatted = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const refId = `#ATT-${sessionDate.replace(/-/g, '')}-${studentId}`;
 
   // 5. Idempotent Transaction Execution
   const recordRef = doc(db, 'attendance', recordId);
@@ -256,6 +293,22 @@ export async function checkOutResident(req: CheckOutRequest): Promise<Attendance
   const now = new Date();
   const timeFormatted = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+  // Flow D: If the resident is already OUT, do not create another OUT record for the same uninterrupted absence
+  try {
+    const studentSnap = await getDoc(doc(db, 'students', studentDocId));
+    if (studentSnap.exists()) {
+      const studentData = studentSnap.data() as Student;
+      if (studentData.attendanceStatus === 'OUT') {
+        const existingRec = await getDoc(doc(db, 'attendance', recordId));
+        if (existingRec.exists()) {
+          return existingRec.data() as AttendanceRecord;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[CheckOut] Idempotency check note:', err);
+  }
+
   const record: AttendanceRecord = {
     id: recordId,
     refId: `#ATT-${sDate.replace(/-/g, '')}-${studentId}`,
@@ -265,8 +318,9 @@ export async function checkOutResident(req: CheckOutRequest): Promise<Attendance
     status: 'Declared OUT',
     confirmationTime: timeFormatted,
     capturedAddress: 'Out-Pass Authorized Outing',
-    method: 'Campus Gate Terminal',
-    notes: outPassReason,
+    method: 'Resident Handset Check-out',
+    notes: outPassReason || 'Left hostel',
+    outReason: outPassReason,
     checkOutAt: now.toISOString(),
     verifiedBy: actor.name,
     createdAt: now.toISOString(),
@@ -277,6 +331,9 @@ export async function checkOutResident(req: CheckOutRequest): Promise<Attendance
     await updateDoc(doc(db, 'students', studentDocId), {
       attendanceStatus: 'OUT',
       outTime: timeFormatted,
+      outReason: outPassReason || '',
+      estimatedReturnTime: '', // Reset on new departure
+      estimatedReturnTimeSubmittedAt: '',
       outPass: `#OUT-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
       lastUpdated: timeFormatted,
     });
@@ -290,11 +347,53 @@ export async function checkOutResident(req: CheckOutRequest): Promise<Attendance
     target: `Student ${studentId}`,
     previousValue: 'IN',
     newValue: 'Declared OUT',
-    reason: outPassReason,
+    reason: outPassReason || 'Left hostel premises',
     category: 'attendance',
   });
 
   return record;
+}
+
+/**
+ * Records an estimated return time submitted by a resident who is currently marked OUT.
+ * Flow F: Informational only — does NOT change the resident's attendance status.
+ */
+export async function recordEstimatedReturnTime(
+  studentDocId: string,
+  hostelId: string,
+  estimatedReturnTime: string,
+  actor: UserProfile
+): Promise<void> {
+  const sessionDate = getCurrentSessionDate();
+  const recordId = `att_${studentDocId}_${sessionDate}`;
+  const nowIso = new Date().toISOString();
+
+  try {
+    await updateDoc(doc(db, 'students', studentDocId), {
+      estimatedReturnTime,
+      estimatedReturnTimeSubmittedAt: nowIso,
+      lastUpdated: `Expected return: ${estimatedReturnTime}`,
+    });
+
+    try {
+      await updateDoc(doc(db, 'attendance', recordId), {
+        estimatedReturnTime,
+        estimatedReturnTimeSubmittedAt: nowIso,
+      });
+    } catch {}
+  } catch (err) {
+    console.warn('[recordEstimatedReturnTime] Local buffer note:', err);
+  }
+
+  await logAuditEvent({
+    operator: actor.name,
+    role: actor.role,
+    target: `Student ${studentDocId}`,
+    previousValue: 'OUT',
+    newValue: `OUT (Estimated Return: ${estimatedReturnTime})`,
+    reason: `Resident submitted estimated return time: ${estimatedReturnTime}`,
+    category: 'attendance',
+  });
 }
 
 /**

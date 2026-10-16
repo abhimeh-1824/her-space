@@ -16,10 +16,75 @@ import {
   parseAndValidateStudentCsv,
   getAuditHistory,
   isValidTimeString,
+  hostelCache,
 } from '../lib/hostel-service';
-import { UserProfile, Student, AttendanceRecord } from '../types';
+import { UserProfile, Student, AttendanceRecord, Hostel } from '../types';
 import { ForbiddenError, ValidationError } from '../lib/errors';
-import { INITIAL_STUDENTS, INITIAL_ATTENDANCE_HISTORY } from '../data/mockData';
+const INITIAL_STUDENTS: Student[] = [
+  {
+    id: 't_stu_1',
+    studentId: 'STU-001',
+    hostelId: 'HST-SUN-01',
+    name: 'Rahul Sharma',
+    rollNo: '#21CSE084',
+    semester: '4th Sem',
+    room: 'A-101',
+    block: 'Block A',
+    floor: 1,
+    email: 'rahul.s@campus.edu',
+    phone: '+91 98000 00000',
+    guardianPhone: '+91 98000 00001',
+    status: 'active',
+    device: 'Mobile',
+    browser: 'Chrome',
+    deviceStatus: 'registered',
+    attendanceStatus: 'IN',
+    lastUpdated: '10:00 PM',
+    avatarInitials: 'RS',
+  },
+  {
+    id: 't_stu_2',
+    studentId: 'STU-002',
+    hostelId: 'HST-SUN-01',
+    name: 'Pooja Verma',
+    rollNo: '#21CSE085',
+    semester: '4th Sem',
+    room: 'A-102',
+    block: 'Block A',
+    floor: 1,
+    email: 'pooja@herspace.app',
+    phone: '+91 98000 00001',
+    guardianPhone: '+91 98000 00002',
+    status: 'active',
+    device: 'Mobile',
+    browser: 'Chrome',
+    deviceStatus: 'registered',
+    attendanceStatus: 'OUT',
+    lastUpdated: '09:00 PM',
+    avatarInitials: 'PV',
+  },
+];
+
+const INITIAL_ATTENDANCE_HISTORY: AttendanceRecord[] = [
+  {
+    id: 'att_1',
+    refId: '#ATT-001',
+    studentId: 'STU-001',
+    hostelId: 'HST-SUN-01',
+    date: new Date().toISOString().slice(0, 10),
+    status: 'Confirmed IN',
+    method: 'Biometric Face-Mesh',
+  },
+  {
+    id: 'att_2',
+    refId: '#ATT-002',
+    studentId: 'STU-002',
+    hostelId: 'HST-SUN-01',
+    date: new Date().toISOString().slice(0, 10),
+    status: 'Declared OUT',
+    method: 'Warden Override',
+  },
+];
 
 function assert(condition: boolean, testName: string, detail?: string) {
   if (!condition) {
@@ -34,6 +99,28 @@ async function runPhaseGTests() {
   console.log('====================================================');
   console.log('Running HostelGuard Phase G Hostel Settings & Reports Suite');
   console.log('====================================================\n');
+
+  // Seed test hostels in cache for test environment
+  hostelCache.set('HST-SUN-01', {
+    id: 'HST-SUN-01',
+    name: 'Sunita Rao Hall',
+    jurisdictionCode: 'JUR-SUN-01',
+    capacity: 200,
+    totalStudents: 180,
+    activeShift: 'Night Curfew Shift',
+    curfewStart: '22:00',
+    curfewEnd: '00:00',
+  } as Hostel);
+  hostelCache.set('HST-ANN-02', {
+    id: 'HST-ANN-02',
+    name: 'Ananya Sen Block',
+    jurisdictionCode: 'JUR-ANN-02',
+    capacity: 150,
+    totalStudents: 140,
+    activeShift: 'Night Curfew Shift',
+    curfewStart: '22:00',
+    curfewEnd: '00:00',
+  } as Hostel);
 
   // Test Actors
   const superAdmin: UserProfile = {

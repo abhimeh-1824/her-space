@@ -4,6 +4,7 @@
  */
 
 import { UserProfile, UserRole } from '../types';
+import { config } from './config';
 
 export const ROLES: Record<string, UserRole> = {
   STUDENT: 'student',
@@ -100,7 +101,7 @@ export function getMockUserForRole(role: UserRole, email?: string): UserProfile 
     case 'super_admin':
       return {
         uid: 'super_admin_01',
-        email: email || 'abhishekmehra1245@gmail.com',
+        email: email || config.admin.email || 'admin@campus.edu',
         role: 'super_admin',
         name: 'Campus Proctor Admin',
         hostelId: 'HST-SUN-01',

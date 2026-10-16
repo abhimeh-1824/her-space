@@ -1,9 +1,9 @@
 /**
- * Environment validation module for HostelGuard
- * Validates runtime variables and Firebase configuration integrity.
+ * Environment validation module for HER-SPACE / HostelGuard
+ * Proxies to central config module.
  */
 
-import firebaseConfig from '../../firebase-applet-config.json';
+import { config, validateConfig } from './config';
 
 export interface ValidatedConfig {
   projectId: string;
@@ -18,32 +18,20 @@ export interface ValidatedConfig {
 }
 
 export function validateEnvironment(): ValidatedConfig {
-  const missingFields: string[] = [];
-
-  if (!firebaseConfig.projectId) missingFields.push('projectId');
-  if (!firebaseConfig.apiKey) missingFields.push('apiKey');
-  if (!firebaseConfig.appId) missingFields.push('appId');
-  if (!firebaseConfig.firestoreDatabaseId) missingFields.push('firestoreDatabaseId');
-
-  if (missingFields.length > 0) {
-    throw new Error(
-      `[HostelGuard Env Validation] Missing critical Firebase configuration fields: ${missingFields.join(', ')}`
-    );
-  }
-
-  const appUrl = (typeof process !== 'undefined' && process.env?.APP_URL) || window.location.origin;
-
+  validateConfig();
   return {
-    projectId: firebaseConfig.projectId,
-    appId: firebaseConfig.appId,
-    apiKey: firebaseConfig.apiKey,
-    authDomain: firebaseConfig.authDomain || `${firebaseConfig.projectId}.firebaseapp.com`,
-    firestoreDatabaseId: firebaseConfig.firestoreDatabaseId,
-    storageBucket: firebaseConfig.storageBucket || `${firebaseConfig.projectId}.firebasestorage.app`,
-    messagingSenderId: firebaseConfig.messagingSenderId || '',
-    appUrl,
-    isProduction: import.meta.env?.PROD ?? false,
+    projectId: config.firebase.projectId,
+    appId: config.firebase.appId,
+    apiKey: config.firebase.apiKey,
+    authDomain: config.firebase.authDomain,
+    firestoreDatabaseId: config.firebase.firestoreDatabaseId,
+    storageBucket: config.firebase.storageBucket,
+    messagingSenderId: config.firebase.messagingSenderId,
+    appUrl: config.server.appUrl,
+    isProduction: config.server.isProduction,
   };
 }
 
 export const env = validateEnvironment();
+export { config };
+export default config;

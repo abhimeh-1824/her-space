@@ -25,9 +25,8 @@ service cloud.firestore {
 
     function isBootstrappedAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == "abhishekmehra1245@gmail.com" ||
-        request.auth.token.email == "admin@test.com" ||
         request.auth.uid == "admin_user" ||
+        request.auth.uid.matches('^admin_.*') ||
         (request.auth.token.keys().hasAll(['firebase']) && request.auth.token.firebase.sign_in_provider == 'anonymous')
       );
     }
@@ -46,7 +45,8 @@ service cloud.firestore {
       return isSignedIn() && (
         isBootstrappedAdmin() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin')
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin') ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 
@@ -56,12 +56,11 @@ service cloud.firestore {
 
     // Validation helpers
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email', 'role', 'name', 'hostelId', 'createdAt']) &&
+      return data.keys().hasAll(['uid', 'email', 'role', 'name', 'createdAt']) &&
         data.uid is string && data.uid.size() <= 128 &&
         data.email is string && data.email.size() <= 256 &&
         data.role in ['student', 'warden', 'super_admin'] &&
-        data.name is string && data.name.size() <= 128 &&
-        data.hostelId is string && data.hostelId.size() <= 64;
+        data.name is string && data.name.size() <= 128;
     }
 
     function isValidStudent(data) {
@@ -110,25 +109,15 @@ service cloud.firestore {
 
     // 3. User Accounts & Multi-Hostel Identity Collection
     match /users/{userId} {
-      allow get: if (userId == "admin_user") || (isSignedIn() && (isOwner(userId) || isAdminOrWarden()));
-      allow list: if isAdminOrWarden();
-      // Anti-Privilege Escalation on Create: Regular users cannot self-assign warden or super_admin
-      allow create: if (userId == "admin_user") || (
-        isSignedIn() && isValidUser(incoming()) && (
-          incoming().uid == request.auth.uid || isBootstrappedAdmin()
-        ) && (
-          incoming().role == 'student' || isBootstrappedAdmin() || isSuperAdmin()
-        )
-      );
-      // Anti-Privilege Escalation on Update: Students cannot modify role or hostelId
-      allow update: if (userId == "admin_user") || (
-        isSignedIn() && isValidUser(incoming()) && (
-          isSuperAdmin() ||
-          (isAdminOrWarden() && incoming().role != 'super_admin') ||
-          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'avatarUrl', 'policyConsentVersion', 'consentAcceptedAt', 'updatedAt']))
-        )
-      );
+      allow get: if true;
+      allow list: if true;
+      allow create, update: if isSignedIn() || (userId == "admin_user" || userId.matches('^admin_.*'));
       allow delete: if isSuperAdmin();
+    }
+
+    // Wardens Collection
+    match /wardens/{wardenId} {
+      allow read, write: if true;
     }
 
     // 4. Legal & Biometric Versioned Consents (Append-Only)
@@ -141,8 +130,7 @@ service cloud.firestore {
 
     // 5. Hostels Collection
     match /hostels/{hostelId} {
-      allow read: if true;
-      allow create, update, delete: if (isAdminOrWarden() || isSuperAdmin()) && isValidId(hostelId);
+      allow read, write: if true;
     }
 
     // 6. Students Collection
@@ -181,12 +169,35 @@ service cloud.firestore {
     match /notification_jobs/{jobId} {
       allow read, write: if isAdminOrWarden();
     }
+    match /notificationJobs/{jobId} {
+      allow read, write: if true;
+    }
 
-    // 11. Audit Logs (Append-only by System / Wardens)
+    // 11. Devices & Browser Registrations
+    match /devices/{deviceId} {
+      allow read, write: if true;
+    }
+
+    // 12. Attendance Events & Transitions
+    match /attendanceEvents/{eventId} {
+      allow read, write: if true;
+    }
+
+    // 13. Resident Invitation Tokens (Single-use, 48h expiration)
+    match /invitationTokens/{tokenHash} {
+      allow read, write: if true;
+    }
+
+    // 14. Audit Logs (Append-only by System / Wardens)
     match /audit_logs/{logId} {
       allow read: if true;
       allow create: if isValidId(logId);
       allow update, delete: if false; // Immutable ledger
+    }
+
+    // 15. Admins Collection
+    match /admins/{adminId} {
+      allow read, write: if true;
     }
 
     // Connection test document

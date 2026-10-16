@@ -18,7 +18,6 @@ import {
   CsvImportResult,
   CsvImportError,
 } from '../types';
-import { INITIAL_HOSTELS, INITIAL_STUDENTS, INITIAL_ATTENDANCE_HISTORY, INITIAL_AUDIT_LOGS } from '../data/mockData';
 import { canModifyHostelSettings } from './auth';
 import { ValidationError, ForbiddenError, NotFoundError } from './errors';
 import { logAuditEvent } from './attendance-service';
@@ -26,14 +25,60 @@ import { toIST, getCurrentSessionDate } from './timezone';
 
 // Default settings per hostel
 export const DEFAULT_HOSTEL_SETTINGS: Record<string, HostelSettings> = {
-  'HST-SUN-01': {
-    hostelId: 'HST-SUN-01',
-    hostelName: 'Sunrise Boys Hostel',
-    tenancyNode: 'HP-KL-02',
-    campusZone: 'North Campus, Complex Block B',
+  'HST-HER-01': {
+    hostelId: 'HST-HER-01',
+    hostelName: 'HER-SPACE Residency (Main Wing)',
+    tenancyNode: 'HER-NODE-01',
+    campusZone: 'Central Residency Complex, North Wing',
     capacity: 120,
     totalStudents: 120,
-    activeShift: 'Active Night Shift (21:00 — 06:00)',
+    activeShift: 'Night Curfew Shift (21:00 — 06:00)',
+    windowOpen: '22:00',
+    reminder1: '22:15',
+    reminder2: '23:00',
+    curfewCutoff: '00:00',
+    lateProtocol: 'warden-req',
+    missingProtocol: 'physical',
+    allowExtensions: true,
+    maxExtensionMins: 60,
+    geofenceLatitude: 31.9578,
+    geofenceLongitude: 77.1095,
+    geofenceRadiusMeters: 200,
+    primaryWarden: 'Chief Warden Sunita Rao (#W-HER-01)',
+    securityCheckpost: 'HER-SPACE Security Gate 1 (Biometric Turnstile)',
+    updatedAt: '2026-10-14T12:00:00.000Z',
+  },
+  'HST-HER-02': {
+    hostelId: 'HST-HER-02',
+    hostelName: 'HER-SPACE Residency (South Wing)',
+    tenancyNode: 'HER-NODE-02',
+    campusZone: 'Central Residency Complex, South Wing',
+    capacity: 64,
+    totalStudents: 64,
+    activeShift: 'Night Curfew Shift (21:00 — 06:00)',
+    windowOpen: '22:00',
+    reminder1: '22:15',
+    reminder2: '23:00',
+    curfewCutoff: '00:00',
+    lateProtocol: 'auto-log',
+    missingProtocol: 'call-parent',
+    allowExtensions: true,
+    maxExtensionMins: 45,
+    geofenceLatitude: 31.9592,
+    geofenceLongitude: 77.111,
+    geofenceRadiusMeters: 150,
+    primaryWarden: 'Duty Warden Ananya Sen (#W-HER-02)',
+    securityCheckpost: 'HER-SPACE Security Gate 2 (Secure Access Bay)',
+    updatedAt: '2026-10-14T12:00:00.000Z',
+  },
+  'HST-SUN-01': {
+    hostelId: 'HST-SUN-01',
+    hostelName: 'HER-SPACE Campus Block A',
+    tenancyNode: 'HER-NODE-01',
+    campusZone: 'Central Residency Complex Block A',
+    capacity: 120,
+    totalStudents: 120,
+    activeShift: 'Night Curfew Shift (21:00 — 06:00)',
     windowOpen: '22:00',
     reminder1: '22:15',
     reminder2: '23:00',
@@ -45,18 +90,18 @@ export const DEFAULT_HOSTEL_SETTINGS: Record<string, HostelSettings> = {
     geofenceLatitude: 31.9578,
     geofenceLongitude: 77.1095,
     geofenceRadiusMeters: 150,
-    primaryWarden: 'Warden R. K. Sharma (#W-402)',
-    securityCheckpost: 'Security Gate Post 1 (Main Entrance)',
-    updatedAt: '2026-10-13T12:00:00.000Z',
+    primaryWarden: 'Chief Warden Sunita Rao (#W-HER-01)',
+    securityCheckpost: 'HER-SPACE Main Access Turnstile',
+    updatedAt: '2026-10-14T12:00:00.000Z',
   },
   'HST-ANN-02': {
     hostelId: 'HST-ANN-02',
-    hostelName: 'Sunrise Annex Block C',
-    tenancyNode: 'HP-KL-03',
-    campusZone: 'North Campus, Complex Block C',
+    hostelName: 'HER-SPACE Campus Block B',
+    tenancyNode: 'HER-NODE-02',
+    campusZone: 'Central Residency Complex Block B',
     capacity: 48,
     totalStudents: 48,
-    activeShift: 'Active Night Shift (21:00 — 06:00)',
+    activeShift: 'Night Curfew Shift (21:00 — 06:00)',
     windowOpen: '22:00',
     reminder1: '22:15',
     reminder2: '23:00',
@@ -68,15 +113,15 @@ export const DEFAULT_HOSTEL_SETTINGS: Record<string, HostelSettings> = {
     geofenceLatitude: 31.9585,
     geofenceLongitude: 77.1102,
     geofenceRadiusMeters: 120,
-    primaryWarden: 'Warden M. K. Rawat (#W-415)',
-    securityCheckpost: 'Security Gate Post 2 (Rear Turnstile)',
-    updatedAt: '2026-10-13T12:00:00.000Z',
+    primaryWarden: 'Duty Warden Ananya Sen (#W-HER-02)',
+    securityCheckpost: 'HER-SPACE Gate 2',
+    updatedAt: '2026-10-14T12:00:00.000Z',
   },
 };
 
 // In-memory runtime cache for seamless offline fallback
-const hostelCache = new Map<string, Hostel>(INITIAL_HOSTELS.map((h) => [h.id, h]));
-const settingsCache = new Map<string, HostelSettings>(
+export const hostelCache = new Map<string, Hostel>();
+export const settingsCache = new Map<string, HostelSettings>(
   Object.entries(DEFAULT_HOSTEL_SETTINGS)
 );
 
@@ -89,17 +134,34 @@ export function isValidTimeString(timeStr: string): boolean {
   return match;
 }
 
+const isTestMode = typeof process !== 'undefined' && (
+  process.env.NODE_ENV === 'test' ||
+  (Array.isArray(process.argv) && process.argv.some((a) => a.includes('test')))
+);
+
 /**
  * Fetches authorized hostels for a user profile
  */
 export async function getHostelsForUser(actor: UserProfile): Promise<Hostel[]> {
+  if (hostelCache.size === 0) {
+    try {
+      const snap = await getDocs(collection(db, 'hostels'));
+      snap.forEach((d) => {
+        const h = d.data() as Hostel;
+        hostelCache.set(h.id, h);
+      });
+    } catch (err) {
+      console.warn('[HostelService] Fetch hostels note:', err);
+    }
+  }
+
   if (actor.role === 'super_admin') {
     return Array.from(hostelCache.values());
   }
 
   if (actor.role === 'warden') {
     const allowed = new Set(actor.hostelMemberships || [actor.hostelId]);
-    allowed.add(actor.hostelId);
+    if (actor.hostelId) allowed.add(actor.hostelId);
     return Array.from(hostelCache.values()).filter((h) => allowed.has(h.id));
   }
 
@@ -292,13 +354,13 @@ export async function updateHostelSettings(
  */
 export function generateAttendanceReport(
   filter: AttendanceReportFilter,
-  students: Student[] = INITIAL_STUDENTS,
+  students: Student[] = [],
   customRecords?: AttendanceRecord[]
 ): {
   records: (AttendanceRecord & { studentName?: string; rollNo?: string; room?: string; studentAvatar?: string })[];
   metrics: AttendanceReportMetrics;
 } {
-  const allRecords = customRecords && customRecords.length > 0 ? customRecords : INITIAL_ATTENDANCE_HISTORY;
+  const allRecords = customRecords || [];
   const studentMap = new Map<string, Student>();
   for (const s of students) {
     studentMap.set(s.studentId, s);
@@ -443,7 +505,7 @@ function escapeCsvField(val: unknown): string {
  */
 export function exportAttendanceToCsv(
   records: AttendanceRecord[],
-  students: Student[] = INITIAL_STUDENTS
+  students: Student[] = []
 ): string {
   const studentMap = new Map<string, Student>();
   for (const s of students) {
@@ -779,25 +841,15 @@ export async function getAuditHistory(
   category?: string,
   searchQuery?: string
 ): Promise<AuditLogEntry[]> {
-  const logs = [...INITIAL_AUDIT_LOGS];
+  const logs: AuditLogEntry[] = [];
 
-  try {
-    const q = query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(50));
-    const snap = await getDocs(q);
-    const firestoreLogs: AuditLogEntry[] = [];
-    snap.forEach((docSnap) => {
-      firestoreLogs.push(docSnap.data() as AuditLogEntry);
-    });
-    // Deduplicate by ID
-    const seen = new Set(logs.map((l) => l.id));
-    for (const fl of firestoreLogs) {
-      if (!seen.has(fl.id)) {
-        logs.unshift(fl);
-        seen.add(fl.id);
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('herspace_audit_logs');
+      if (raw) {
+        logs.push(...JSON.parse(raw));
       }
-    }
-  } catch (err) {
-    console.warn('[HostelService] Audit logs local fallback:', err);
+    } catch {}
   }
 
   let filtered = logs;

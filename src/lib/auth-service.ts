@@ -50,7 +50,7 @@ export interface ConsentParams {
   rollNo: string;
 }
 
-const BOOTSTRAPPED_ADMIN_EMAIL = 'abhishekmehra1245@gmail.com';
+import { config } from './config';
 
 /**
  * Validates role assignment to prevent privilege escalation attacks.
@@ -62,7 +62,7 @@ export function sanitizeRoleAssignment(
   isAuthorizingAdmin = false
 ): UserRole {
   const normalized = userEmail.toLowerCase().trim();
-  if (normalized === 'admin@test.com' || normalized === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
+  if (config.admin.authorizedEmails.includes(normalized)) {
     return 'super_admin';
   }
   if (!requestedRole || requestedRole === 'student') {
@@ -168,27 +168,66 @@ export async function loginUser(params: LoginParams): Promise<UserProfile> {
   const cleanEmail = email.trim().toLowerCase();
   const cleanPassword = password.trim();
 
-  // 1. Direct database credentials check for admin (admin@test.com / admin)
-  if (cleanEmail === 'admin@test.com' && cleanPassword === 'admin') {
+  // Helper to ensure Firebase Auth session is active so request.auth is populated in Firestore rules
+  const ensureFirebaseAuthActive = async () => {
+    if (!auth.currentUser) {
+      try {
+        await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+      } catch (authErr: any) {
+        if (authErr?.code === 'auth/user-not-found' || authErr?.code === 'auth/invalid-credential') {
+          try {
+            await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+          } catch {}
+        }
+        if (!auth.currentUser) {
+          try {
+            const { signInAnonymously } = await import('firebase/auth');
+            await signInAnonymously(auth);
+          } catch {}
+        }
+      }
+    }
+  };
+
+  // 0. Check central full-stack authentication API first
+  try {
+    const apiRes = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, password: cleanPassword }),
+    });
+    if (apiRes.ok) {
+      const data = await apiRes.json();
+      if (data.success && data.user) {
+        return data.user as UserProfile;
+      }
+    } else {
+      const errData = await apiRes.json().catch(() => ({}));
+      if (errData.error) {
+        throw new ValidationError(errData.error);
+      }
+    }
+  } catch (apiErr: any) {
+    if (apiErr instanceof ValidationError) throw apiErr;
+    console.debug('[auth-service] API login fallback:', apiErr);
+  }
+
+  // 1. Direct database credentials check for provisioned admin in Firestore (/users/admin_user)
+  try {
     const adminDocRef = doc(db, 'users', 'admin_user');
     const adminSnap = await getDoc(adminDocRef);
     if (adminSnap.exists()) {
-      return adminSnap.data() as UserProfile;
+      const adminData = adminSnap.data() as UserProfile & { password?: string };
+      if (
+        (adminData.email && adminData.email.toLowerCase() === cleanEmail && adminData.password === cleanPassword) ||
+        (config.admin.authorizedEmails.includes(cleanEmail) && Boolean(config.admin.password) && cleanPassword === config.admin.password)
+      ) {
+        await ensureFirebaseAuthActive();
+        return adminData;
+      }
     }
-    const adminProfile: UserProfile = {
-      uid: 'admin_user',
-      email: 'admin@test.com',
-      role: 'super_admin',
-      name: 'System Administrator',
-      hostelId: 'HST-SUN-01',
-      hostelMemberships: ['HST-SUN-01', 'HST-ANN-02'],
-      policyConsentVersion: 'v2.4',
-      consentAcceptedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      phone: '+91 98000 00000',
-    };
-    await setDoc(adminDocRef, { ...adminProfile, password: 'admin' });
-    return adminProfile;
+  } catch (err) {
+    console.debug('[auth-service] Admin doc check:', err);
   }
 
   // 2. Direct Firestore lookup by email for any pre-seeded user with stored credentials
@@ -199,6 +238,7 @@ export async function loginUser(params: LoginParams): Promise<UserProfile> {
     if (!snap.empty) {
       const matched = snap.docs[0].data() as UserProfile & { password?: string };
       if (matched.password && matched.password === cleanPassword) {
+        await ensureFirebaseAuthActive();
         return matched;
       }
     }
@@ -218,7 +258,7 @@ export async function loginUser(params: LoginParams): Promise<UserProfile> {
     if (!userSnap.exists()) {
       // Self-heal profile if missing
       const defaultRole: UserRole =
-        cleanEmail === 'admin@test.com' || cleanEmail === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()
+        config.admin.authorizedEmails.includes(cleanEmail)
           ? 'super_admin'
           : 'student';
       const fallbackProfile: UserProfile = {
@@ -226,8 +266,8 @@ export async function loginUser(params: LoginParams): Promise<UserProfile> {
         email,
         role: defaultRole,
         name: email.split('@')[0],
-        hostelId: 'HST-SUN-01',
-        hostelMemberships: ['HST-SUN-01'],
+        hostelId: '',
+        hostelMemberships: [],
         policyConsentVersion: 'v2.4',
         consentAcceptedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
